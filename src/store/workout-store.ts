@@ -6,7 +6,8 @@ import {
   type SyncedRepository,
   type WorkoutRepository,
 } from '@/lib/storage'
-import { ROUTINE } from '@/data/routine'
+import { routineDayIds } from '@/lib/routine'
+import { getRoutineDays } from '@/store/routine-store'
 import type { DayId, ExportPayload, SetEntry, WorkoutLog } from '@/types'
 
 type Status = 'loading' | 'ready' | 'error'
@@ -273,7 +274,7 @@ export const actions = {
     const fromWeek = previousWeeks.at(-1)
     if (!fromWeek) return null
     let days = 0
-    for (const d of ROUTINE) {
+    for (const d of getRoutineDays()) {
       const src = state.logs[logId(fromWeek, d.id)]
       if (!src) continue
       writeLog(logId(weekKey, d.id), cloneLog(src, weekKey))
@@ -336,7 +337,7 @@ function cloneLog(source: WorkoutLog, weekKey: string): WorkoutLog {
   return { id: logId(weekKey, source.day), weekKey, day: source.day, exercises, updatedAt: Date.now() }
 }
 
-const DAY_IDS = new Set(ROUTINE.map((d) => d.id))
+const dayIdsForImport = () => routineDayIds(getRoutineDays())
 const numOrNull = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
 function parseImport(raw: unknown): WorkoutLog[] {
@@ -345,7 +346,7 @@ function parseImport(raw: unknown): WorkoutLog[] {
     throw new Error('El archivo no es una copia de seguridad de FitTrack.')
   }
   return payload.logs.map((l) => {
-    if (typeof l.weekKey !== 'string' || !/^\d{4}-W\d{2}$/.test(l.weekKey) || !DAY_IDS.has(l.day)) {
+    if (typeof l.weekKey !== 'string' || !/^\d{4}-W\d{2}$/.test(l.weekKey) || !dayIdsForImport().has(l.day)) {
       throw new Error('El archivo contiene sesiones con un formato no válido.')
     }
     const exercises: Record<string, SetEntry[]> = {}

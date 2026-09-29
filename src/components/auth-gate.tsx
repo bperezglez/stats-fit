@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { Dumbbell, ShieldAlert } from 'lucide-react'
 import { LoginScreen } from '@/components/login-screen'
 import { authActions, useAuthStore, type AuthUser } from '@/store/auth-store'
+import { routineActions } from '@/store/routine-store'
 import { actions } from '@/store/workout-store'
 
 /** Nothing below this component renders, or touches workout data, without a signed-in user. */
@@ -15,7 +16,10 @@ export function AuthGate({ children }: { children: (user: AuthUser) => ReactNode
   }, [])
 
   useEffect(() => {
-    if (status === 'signed-out') void actions.reset()
+    if (status === 'signed-out') {
+      void actions.reset()
+      routineActions.reset()
+    }
   }, [status])
 
   if (status === 'signed-in' && user) return children(user)

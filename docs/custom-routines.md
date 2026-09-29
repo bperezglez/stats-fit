@@ -150,7 +150,7 @@ No incluir en MVP: biblioteca global de ejercicios, compartir rutinas, periodiza
 
 | Fase | Entregable | Riesgo |
 | --- | --- | --- |
-| 1 | Migración SQL + `RoutineRepository` + seed desde `routine.ts` | Bajo |
+| 1 | Migración SQL + `RoutineRepository` + seed desde `routine.ts` | Bajo — **hecho** (`user_routines`, `routine-store`, lectura en UI) |
 | 2 | `routine-store` + lectura en UI (sin editor) | Bajo |
 | 3 | Editor básico (nombre, target, añadir/archivar) | Medio |
 | 4 | Reordenar, días opcionales, sync offline de rutina | Medio |

@@ -54,7 +54,9 @@ src/
   App.tsx                  layout, vista Sesión/Progreso, semana y día activos, flush al ocultar la página
   index.css                tema Tailwind v4 (oscuro fijo, primario lima), fuentes
   types.ts                 modelo de dominio (DayId, ExerciseKind, SetEntry, WorkoutLog, ExportPayload)
-  data/routine.ts          ROUTINE: rutina L-V con sus ejercicios; DAY_BY_ID, EXERCISE_BY_ID
+  data/routine.ts          DEFAULT_ROUTINE (semilla); la UI lee la rutina del store por usuario
+  store/routine-store.ts   rutina personal por usuario (Supabase `user_routines` o localStorage en dev)
+  lib/routine.ts           parseo/validación del JSON de rutina, índices dayById/exerciseById
   lib/
     week.ts                semanas ISO ("2026-W40"), día actual, navegación entre semanas
     metrics.ts             volumen, estadísticas por ejercicio, deltas, formateo es-ES
@@ -66,8 +68,11 @@ src/
       indexeddb.ts         implementación IndexedDB
       local-storage.ts     fallback localStorage
       supabase.ts          implementación Supabase (una instancia por usuario)
+      supabase-routine.ts  rutina por usuario en Postgres (`user_routines`)
+      local-routine.ts     rutina por usuario en localStorage (modo dev)
       simulated-remote.ts  servidor simulado (solo dev, VITE_SIMULATE_SYNC)
       index.ts             createRepository(userId): elige backend
+      routine-index.ts     createRoutineRepository(userId)
     supabase.ts            cliente Supabase (import dinámico) e isSupabaseConfigured
   store/auth-store.ts      sesión: modo supabase / local / unconfigured, login y logout
   store/workout-store.ts   estado global + acciones (única fuente de verdad), inicializado por usuario
@@ -115,9 +120,12 @@ src/
   - `cardio`: minutos + km opcional.
 - `ExportPayload` (`app: 'fittrack'`, `version: 1`) es el formato de copia de seguridad. Si cambias el modelo, **sube `version`** y mantén `parseImport` compatible con los ficheros antiguos. `parseImport` valida y sanea todo lo importado; no confíes en el JSON de entrada.
 
-### Añadir o cambiar la rutina
+### Rutina por usuario
 
-Edita solo `src/data/routine.ts`. Cada ejercicio: `id` (kebab-case, único en toda la rutina), `name`, `kind`, `target` (texto libre, p. ej. `"4 × 10-12"`), `cue` opcional. Los días son fijos (`DayId`), así que añadir sábado/domingo implica tocar `DayId`, `ROUTINE`, `week.ts` y `parseImport`.
+- La rutina vive en Supabase (`user_routines`, migración `20260929100000_user_routines.sql`) o en localStorage en desarrollo. Al primer acceso se siembra desde `DEFAULT_ROUTINE` en `src/data/routine.ts`.
+- La UI **no** importa `ROUTINE` directamente: usa `useRoutineStore` (`days`, `dayById`, `exerciseById`). Mientras carga, el store expone la rutina por defecto en memoria.
+- Para cambiar la rutina por defecto de cuentas nuevas, edita `DEFAULT_ROUTINE`. Cada ejercicio: `id` (kebab-case, único en toda la rutina), `name`, `kind`, `target`, `cue` opcional. **No renombres `id`** sin migración: son claves del histórico.
+- Editor en app: ver `docs/custom-routines.md` (fases 2+).
 
 ### Autenticación y aislamiento por usuario
 

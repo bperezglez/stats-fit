@@ -1,7 +1,7 @@
-import { ROUTINE } from '@/data/routine'
 import { logSetCount } from '@/lib/metrics'
 import { currentWeekKey, todayDayId } from '@/lib/week'
 import { cn } from '@/lib/utils'
+import { useRoutineStore } from '@/store/routine-store'
 import { logId, useWorkoutStore } from '@/store/workout-store'
 import type { DayId } from '@/types'
 
@@ -13,11 +13,12 @@ interface Props {
 
 export function DayTabs({ weekKey, value, onChange }: Props) {
   const logs = useWorkoutStore((s) => s.logs)
+  const days = useRoutineStore((s) => s.days)
   const today = weekKey === currentWeekKey() ? todayDayId() : null
 
   return (
     <div role="tablist" aria-label="Día de la semana" className="grid grid-cols-5 gap-1.5">
-      {ROUTINE.map((d) => {
+      {days.map((d) => {
         const active = d.id === value
         const done = logSetCount(logs[logId(weekKey, d.id)]) > 0
         return (
