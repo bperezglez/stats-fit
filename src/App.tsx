@@ -7,9 +7,9 @@ import { AppHeader } from '@/components/app-header'
 import { AuthGate } from '@/components/auth-gate'
 import { DaySession } from '@/components/day-session'
 import { DayTabs } from '@/components/day-tabs'
-import { DAY_BY_ID } from '@/data/routine'
 import { currentWeekKey, todayDayId } from '@/lib/week'
 import { useAuthStore, type AuthUser } from '@/store/auth-store'
+import { routineActions, useRoutineStore } from '@/store/routine-store'
 import { actions, flushPendingWrites, useWorkoutStore } from '@/store/workout-store'
 import type { DayId } from '@/types'
 
@@ -28,14 +28,20 @@ export default function App() {
 
 function Workspace({ user }: { user: AuthUser }) {
   const authMode = useAuthStore((s) => s.mode)
-  const status = useWorkoutStore((s) => s.status)
-  const error = useWorkoutStore((s) => s.error)
+  const workoutStatus = useWorkoutStore((s) => s.status)
+  const routineStatus = useRoutineStore((s) => s.status)
+  const workoutError = useWorkoutStore((s) => s.error)
+  const routineError = useRoutineStore((s) => s.error)
+  const dayById = useRoutineStore((s) => s.dayById)
+  const status = workoutStatus === 'loading' || routineStatus === 'loading' ? 'loading' : workoutStatus
+  const error = workoutError ?? routineError
   const [weekKey, setWeekKey] = useState(currentWeekKey)
   const [day, setDay] = useState<DayId>(() => todayDayId() ?? 'lunes')
   const [view, setView] = useState<View>('session')
 
   useEffect(() => {
-    actions.init(user.id)
+    void routineActions.init(user.id)
+    void actions.init(user.id)
   }, [user.id])
 
   useEffect(() => {
@@ -76,7 +82,14 @@ function Workspace({ user }: { user: AuthUser }) {
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="size-4 shrink-0" />
             <span className="flex-1">{error}</span>
-            <button type="button" aria-label="Cerrar aviso" onClick={actions.dismissError}>
+            <button
+              type="button"
+              aria-label="Cerrar aviso"
+              onClick={() => {
+                actions.dismissError()
+                routineActions.dismissError()
+              }}
+            >
               <X className="size-4" />
             </button>
           </div>
@@ -87,14 +100,21 @@ function Workspace({ user }: { user: AuthUser }) {
         {status === 'error' && (
           <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-6 text-center">
             <AlertTriangle className="mx-auto size-8 text-destructive" />
-            <h2 className="mt-2 font-semibold">No se pudo cargar tu historial</h2>
+            <h2 className="mt-2 font-semibold">No se pudo cargar tus datos</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {error}{' '}
               {authMode === 'supabase'
                 ? 'Comprueba tu conexión e inténtalo de nuevo.'
                 : 'Comprueba que el navegador no esté en modo privado estricto.'}
             </p>
-            <Button variant="outline" className="mt-4" onClick={() => actions.retry()}>
+            <Button
+              variant="outline"
+              className="mt-4"
+              onClick={() => {
+                void actions.retry()
+                void routineActions.retry()
+              }}
+            >
               <RotateCw />
               Reintentar
             </Button>
@@ -103,7 +123,7 @@ function Workspace({ user }: { user: AuthUser }) {
 
         {status === 'ready' &&
           (view === 'session' ? (
-            <DaySession key={`${weekKey}-${day}`} day={DAY_BY_ID[day]} weekKey={weekKey} />
+            <DaySession key={`${weekKey}-${day}`} day={dayById[day]} weekKey={weekKey} />
           ) : (
             <Suspense fallback={<LoadingSkeleton />}>
               <ProgressView weekKey={weekKey} />
