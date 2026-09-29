@@ -5,13 +5,21 @@ import {
   addExerciseToDay,
   createDefaultRoutineDocument,
   createManualExercise,
+  enabledDays,
   exerciseFromCatalog,
+  exerciseHasLoggedSets,
+  isDayEnabled,
   parseRoutineDocument,
+  removeOrArchiveExercise,
+  reorderExercises,
   restoreDefaultRoutineDocument,
   routineDayIds,
+  setDayEnabled,
   setExerciseArchived,
+  updateDayMeta,
   updateExerciseInDay,
 } from '@/lib/routine'
+import type { WorkoutLog } from '@/types'
 
 describe('parseRoutineDocument', () => {
   it('accepts the default shipped routine', () => {
@@ -107,5 +115,109 @@ describe('routine mutations', () => {
     const restored = restoreDefaultRoutineDocument()
     expect(restored.days).toHaveLength(DEFAULT_ROUTINE.length)
     expect(restored.days[0].exercises).toHaveLength(DEFAULT_ROUTINE[0].exercises.length)
+  })
+
+  it('renames a day without changing its id', () => {
+    const doc = createDefaultRoutineDocument()
+    const exerciseIds = doc.days[1].exercises.map((e) => e.id)
+    const updated = updateDayMeta(doc, 'martes', {
+      label: 'Pecho',
+      title: 'Empuje',
+      focus: 'Press y espalda',
+      short: 'Ma',
+    })
+    expect(updated.days[1]).toMatchObject({
+      id: 'martes',
+      label: 'Pecho',
+      title: 'Empuje',
+      focus: 'Press y espalda',
+      short: 'Ma',
+    })
+    expect(updated.days[1].exercises.map((e) => e.id)).toEqual(exerciseIds)
+    expect(doc.days[1].label).toBe('Martes')
+  })
+
+  it('rejects an empty day label and an oversized short name', () => {
+    const doc = createDefaultRoutineDocument()
+    expect(() => updateDayMeta(doc, 'lunes', { label: '   ' })).toThrow(/nombre del día/)
+    expect(() => updateDayMeta(doc, 'lunes', { short: 'Lunes' })).toThrow(/3 caracteres/)
+    expect(updateDayMeta(doc, 'lunes', { focus: '   ' }).days[0].focus).toBe('')
+  })
+
+  it('reorders exercises and keeps every id', () => {
+    const doc = createDefaultRoutineDocument()
+    const ids = doc.days[0].exercises.map((e) => e.id)
+    const moved = reorderExercises(doc, 'lunes', 0, 2)
+    expect(moved.days[0].exercises.map((e) => e.id)).toEqual([ids[1], ids[2], ids[0], ...ids.slice(3)])
+    expect(moved.days[0].id).toBe('lunes')
+    expect(reorderExercises(doc, 'lunes', 1, 1)).toBe(doc)
+    expect(() => reorderExercises(doc, 'lunes', 0, 99)).toThrow(/posición/)
+  })
+
+  it('removes an exercise that was never logged', () => {
+    let doc = createDefaultRoutineDocument()
+    const manual = createManualExercise({ name: 'Sin historial' })
+    doc = addExerciseToDay(doc, 'jueves', manual)
+    const result = removeOrArchiveExercise(doc, 'jueves', manual.id, false)
+    expect(result.action).toBe('removed')
+    expect(result.doc.days.flatMap((d) => d.exercises).some((e) => e.id === manual.id)).toBe(false)
+  })
+
+  it('archives an exercise that has logged sets instead of deleting it', () => {
+    const doc = createDefaultRoutineDocument()
+    const id = doc.days[0].exercises[0].id
+    const result = removeOrArchiveExercise(doc, 'lunes', id, true)
+    expect(result.action).toBe('archived')
+    const kept = result.doc.days[0].exercises.find((e) => e.id === id)
+    expect(kept?.archived).toBe(true)
+    expect(kept?.name).toBe(doc.days[0].exercises[0].name)
+  })
+})
+
+describe('exerciseHasLoggedSets', () => {
+  const log: WorkoutLog = {
+    id: '2026-W40:lunes',
+    weekKey: '2026-W40',
+    day: 'lunes',
+    exercises: {
+      prensa: [{ id: 's1', reps: 10, weight: 40, duration: null, distance: null }],
+      vacio: [{ id: 's2', reps: null, weight: null, duration: null, distance: null }],
+    },
+    updatedAt: 1,
+  }
+
+  it('is true only when a set has a recorded value', () => {
+    expect(exerciseHasLoggedSets([log], 'prensa')).toBe(true)
+    expect(exerciseHasLoggedSets([log], 'vacio')).toBe(false)
+    expect(exerciseHasLoggedSets([log], 'otro')).toBe(false)
+  })
+})
+
+describe('optional days', () => {
+  it('hides a disabled day and keeps its id', () => {
+    let doc = createDefaultRoutineDocument()
+    doc = setDayEnabled(doc, 'viernes', false)
+    expect(doc.days[4].id).toBe('viernes')
+    expect(doc.days[4].enabled).toBe(false)
+    expect(isDayEnabled(doc.days[4])).toBe(false)
+    expect(enabledDays(doc.days).map((d) => d.id)).toEqual(['lunes', 'martes', 'miercoles', 'jueves'])
+    expect(parseRoutineDocument(doc).days[4].enabled).toBe(false)
+    expect(parseRoutineDocument(doc).days[0].enabled).toBeUndefined()
+  })
+
+  it('refuses to disable the last active day', () => {
+    let doc = createDefaultRoutineDocument()
+    for (const id of ['lunes', 'martes', 'miercoles', 'jueves'] as const) {
+      doc = setDayEnabled(doc, id, false)
+    }
+    expect(() => setDayEnabled(doc, 'viernes', false)).toThrow(/al menos un día/)
+    expect(isDayEnabled(doc.days[4])).toBe(true)
+  })
+
+  it('enables a day again by dropping the flag', () => {
+    let doc = setDayEnabled(createDefaultRoutineDocument(), 'miercoles', false)
+    doc = setDayEnabled(doc, 'miercoles', true)
+    expect(doc.days[2].enabled).toBeUndefined()
+    expect(isDayEnabled(doc.days[2])).toBe(true)
   })
 })

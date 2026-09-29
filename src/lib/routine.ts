@@ -1,7 +1,7 @@
 import { catalogExerciseId } from '@/data/catalog'
 import { DEFAULT_ROUTINE } from '@/data/routine'
 import type { CatalogExercise } from '@/lib/catalog/catalog-types'
-import type { DayId, DayTemplate, ExerciseKind, ExerciseTemplate, UserRoutineDocument } from '@/types'
+import type { DayId, DayTemplate, ExerciseKind, ExerciseTemplate, UserRoutineDocument, WorkoutLog } from '@/types'
 
 const DAY_IDS = new Set<DayId>(['lunes', 'martes', 'miercoles', 'jueves', 'viernes'])
 const KINDS = new Set<ExerciseKind>(['strength', 'timed', 'cardio'])
@@ -18,6 +18,14 @@ export function buildExerciseById(
 
 export function dayIndexOf(days: DayTemplate[], dayId: DayId): number {
   return days.findIndex((d) => d.id === dayId)
+}
+
+export function isDayEnabled(day: DayTemplate): boolean {
+  return day.enabled !== false
+}
+
+export function enabledDays(days: DayTemplate[]): DayTemplate[] {
+  return days.filter(isDayEnabled)
 }
 
 export function activeExercises(day: DayTemplate): ExerciseTemplate[] {
@@ -165,6 +173,128 @@ export function updateExerciseInDay(
   return touch(doc, days)
 }
 
+export type DayMetaPatch = Partial<Pick<DayTemplate, 'label' | 'title' | 'focus' | 'short'>>
+
+export function updateDayMeta(doc: UserRoutineDocument, dayId: DayId, patch: DayMetaPatch): UserRoutineDocument {
+  if (dayIndexOf(doc.days, dayId) < 0) throw new Error('Día no encontrado en la rutina.')
+
+  const days = doc.days.map((day) => {
+    if (day.id !== dayId) return day
+    const label = patch.label !== undefined ? patch.label.trim() : day.label
+    const title = patch.title !== undefined ? patch.title.trim() : day.title
+    const focus = patch.focus !== undefined ? patch.focus.trim() : day.focus
+    const short = patch.short !== undefined ? patch.short.trim() : day.short
+    if (!label) throw new Error('El nombre del día no puede estar vacío.')
+    if (!title) throw new Error('El título del día no puede estar vacío.')
+    if (!short) throw new Error('La abreviatura no puede estar vacía.')
+    if (short.length > 3) throw new Error('La abreviatura puede tener como máximo 3 caracteres.')
+    return { ...day, label, title, focus, short, id: day.id }
+  })
+
+  return touch(doc, days)
+}
+
+export function setDayEnabled(doc: UserRoutineDocument, dayId: DayId, enabled: boolean): UserRoutineDocument {
+  if (dayIndexOf(doc.days, dayId) < 0) throw new Error('Día no encontrado en la rutina.')
+  if (!enabled && doc.days.every((day) => day.id === dayId || !isDayEnabled(day))) {
+    throw new Error('Debe quedar al menos un día activo.')
+  }
+
+  const days = doc.days.map((day) => {
+    if (day.id !== dayId) return day
+    if (enabled) {
+      if (day.enabled === undefined) return day
+      const { enabled: _removed, ...rest } = day
+      return rest
+    }
+    return { ...day, enabled: false as const }
+  })
+
+  return touch(doc, days)
+}
+
+/**
+ * `toIndex` is the index in the list after the item is removed
+ * (the usual drag-and-drop move: the exercise lands on that slot).
+ */
+export function reorderExercises(
+  doc: UserRoutineDocument,
+  dayId: DayId,
+  fromIndex: number,
+  toIndex: number,
+): UserRoutineDocument {
+  const day = doc.days.find((d) => d.id === dayId)
+  if (!day) throw new Error('Día no encontrado en la rutina.')
+  const { exercises } = day
+  if (
+    !Number.isInteger(fromIndex) ||
+    !Number.isInteger(toIndex) ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= exercises.length ||
+    toIndex >= exercises.length
+  ) {
+    throw new Error('No se puede mover el ejercicio a esa posición.')
+  }
+  if (fromIndex === toIndex) return doc
+
+  const nextExercises = exercises.slice()
+  const [moved] = nextExercises.splice(fromIndex, 1)
+  nextExercises.splice(toIndex, 0, moved)
+  const days = doc.days.map((d) => (d.id === dayId ? { ...d, exercises: nextExercises } : d))
+  return touch(doc, days)
+}
+
+export function exerciseHasLoggedSets(logs: Iterable<WorkoutLog>, exerciseId: string): boolean {
+  for (const log of logs) {
+    const sets = log.exercises[exerciseId]
+    if (!sets?.length) continue
+    for (const set of sets) {
+      if (set.reps != null || set.weight != null || set.duration != null || set.distance != null) return true
+    }
+  }
+  return false
+}
+
+export function removeExerciseFromDay(
+  doc: UserRoutineDocument,
+  dayId: DayId,
+  exerciseId: string,
+): UserRoutineDocument {
+  if (dayIndexOf(doc.days, dayId) < 0) throw new Error('Día no encontrado en la rutina.')
+  let found = false
+  const days = doc.days.map((day) => {
+    if (day.id !== dayId) return day
+    const exercises = day.exercises.filter((exercise) => {
+      if (exercise.id !== exerciseId) return true
+      found = true
+      return false
+    })
+    return { ...day, exercises }
+  })
+  if (!found) throw new Error('Ejercicio no encontrado en este día.')
+  return touch(doc, days)
+}
+
+export interface ExerciseRemovalResult {
+  doc: UserRoutineDocument
+  action: 'removed' | 'archived'
+}
+
+/** Deletes an exercise that was never logged; archives it when any workout still references it. */
+export function removeOrArchiveExercise(
+  doc: UserRoutineDocument,
+  dayId: DayId,
+  exerciseId: string,
+  hasLoggedSets: boolean,
+): ExerciseRemovalResult {
+  if (dayIndexOf(doc.days, dayId) < 0) throw new Error('Día no encontrado en la rutina.')
+  if (hasLoggedSets) {
+    return { doc: setExerciseArchived(doc, dayId, exerciseId, true), action: 'archived' }
+  }
+  return { doc: removeExerciseFromDay(doc, dayId, exerciseId), action: 'removed' }
+}
+
 export function setExerciseArchived(
   doc: UserRoutineDocument,
   dayId: DayId,
@@ -227,7 +357,17 @@ function parseDay(raw: unknown): DayTemplate | null {
     if (ids.has(e.id)) return null
     ids.add(e.id)
   }
-  return { id: d.id, short: d.short, label: d.label, title: d.title, focus: d.focus, accent: d.accent, exercises }
+  const day: DayTemplate = {
+    id: d.id,
+    short: d.short,
+    label: d.label,
+    title: d.title,
+    focus: d.focus,
+    accent: d.accent,
+    exercises,
+  }
+  if (d.enabled === false) day.enabled = false
+  return day
 }
 
 /** Validates JSON from Postgres or local storage; throws on corrupt data. */
