@@ -1,5 +1,11 @@
 import { useSyncExternalStore } from 'react'
-import { createRepository, type WorkoutRepository } from '@/lib/storage'
+import {
+  createRepository,
+  isSyncedRepository,
+  type SyncState,
+  type SyncedRepository,
+  type WorkoutRepository,
+} from '@/lib/storage'
 import { ROUTINE } from '@/data/routine'
 import type { DayId, ExportPayload, SetEntry, WorkoutLog } from '@/types'
 
@@ -10,11 +16,14 @@ export interface StoreState {
   error: string | null
   backend: string | null
   logs: Record<string, WorkoutLog>
+  /** Only set when the backend is a remote database behind the offline cache. */
+  sync: SyncState | null
 }
 
-const initialState: StoreState = { status: 'loading', error: null, backend: null, logs: {} }
+const initialState: StoreState = { status: 'loading', error: null, backend: null, logs: {}, sync: null }
 let state: StoreState = initialState
 let repo: WorkoutRepository | null = null
+let unsubscribeRepo: (() => void) | null = null
 let activeUserId: string | null = null
 const listeners = new Set<() => void>()
 const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>()
@@ -102,20 +111,57 @@ function mutateExercise(
 }
 
 let initPromise: Promise<void> | null = null
+let purgeOnReset = false
+
+const byId = (logs: WorkoutLog[]) => Object.fromEntries(logs.map((l) => [l.id, l]))
+
+/** Server data wins, except for logs with an edit still waiting in the debounce. */
+function applyRemoteLogs(logs: WorkoutLog[]) {
+  const next = byId(logs)
+  for (const id of pendingWrites.keys()) {
+    if (state.logs[id]) next[id] = state.logs[id]
+    else delete next[id]
+  }
+  setState({ logs: next })
+}
+
+function connect(next: SyncedRepository) {
+  const offState = next.onSyncStateChange((sync) => setState({ sync }))
+  const offRemote = next.onRemoteChange(applyRemoteLogs)
+  unsubscribeRepo = () => {
+    offState()
+    offRemote()
+  }
+}
 
 async function loadFromRepository(userId: string) {
+  let next: WorkoutRepository | null = null
   try {
-    const next = await createRepository(userId)
+    next = await createRepository(userId)
+    // A device that never downloaded this account waits for the server once;
+    // afterwards the local copy is shown immediately and refreshed in the background.
+    const firstTime = isSyncedRepository(next) && next.getSyncState().lastSyncedAt === null
+    if (firstTime && isSyncedRepository(next)) {
+      const synced = await next.sync()
+      if (synced.status === 'error') throw new Error('Primera sincronización rechazada')
+    }
     const all = await next.getAll()
-    if (activeUserId !== userId) return
+    if (activeUserId !== userId) {
+      if (isSyncedRepository(next)) await next.dispose()
+      return
+    }
     repo = next
+    if (isSyncedRepository(next)) connect(next)
     setState({
       status: 'ready',
       backend: next.name,
-      logs: Object.fromEntries(all.map((l) => [l.id, l])),
+      logs: byId(all),
+      sync: isSyncedRepository(next) ? next.getSyncState() : null,
     })
+    if (!firstTime && isSyncedRepository(next)) void next.sync()
   } catch (err) {
     console.error(err)
+    if (next && isSyncedRepository(next)) await next.dispose()
     if (activeUserId !== userId) return
     setState({ status: 'error', error: 'No se pudo cargar tu historial.' })
   }
@@ -140,14 +186,39 @@ export const actions = {
     return actions.init(userId)
   },
 
-  /** Persists anything pending for the current user, then forgets their data. */
+  /**
+   * Persists anything pending for the current user, then forgets their data.
+   * The offline copy is deleted only if `prepareSignOut` confirmed it was fully uploaded.
+   */
   async reset() {
     const flushing = flushPendingWrites()
+    const previous = repo
+    const purgeIfSynced = purgeOnReset
+    purgeOnReset = false
+    unsubscribeRepo?.()
+    unsubscribeRepo = null
     repo = null
     activeUserId = null
     initPromise = null
     setState(initialState)
     await flushing
+    if (previous && isSyncedRepository(previous)) await previous.dispose({ purgeIfSynced })
+  },
+
+  syncNow(): Promise<SyncState | null> {
+    return repo && isSyncedRepository(repo) ? repo.sync() : Promise.resolve(null)
+  },
+
+  /**
+   * Call before signing out, while the session can still write: uploads what it
+   * can and returns how many changes stay queued on this device.
+   */
+  async prepareSignOut(): Promise<number> {
+    await flushPendingWrites()
+    if (!repo || !isSyncedRepository(repo)) return 0
+    const { pending } = await repo.sync()
+    purgeOnReset = pending === 0
+    return pending
   },
 
   dismissError() {

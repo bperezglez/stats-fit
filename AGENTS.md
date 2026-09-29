@@ -12,7 +12,7 @@ Instrucciones para agentes de IA (Cursor, Claude Code, Codex, Copilot…) y pers
 
 **FitTrack**: PWA mínima y rápida para registrar entrenamiento semanal de fuerza, hipertrofia y cardio. Una rutina fija de lunes a viernes; cada ejercicio se registra por series (reps × kg = volumen, o duración/distancia en cardio). Hay gráficos de evolución por ejercicio, vista de progreso y botón para copiar la semana anterior.
 
-- **Multiusuario con login de Google** (Supabase Auth). Toda la app está detrás de `AuthGate`; los datos viven en Supabase (`workout_logs`, RLS por `user_id = auth.uid()`). Sin claves de Supabase, en `npm run dev` hay perfiles locales de desarrollo con una base IndexedDB por usuario; en producción sin claves nadie puede entrar.
+- **Multiusuario con login de Google** (Supabase Auth). Toda la app está detrás de `AuthGate`; los datos viven en Supabase (`workout_logs`, RLS por `user_id = auth.uid()`). Con Supabase activo, cada usuario tiene además una **caché offline** en IndexedDB (`fittrack-cache:{userId}`) con cola de escrituras: la app funciona sin conexión y sube los cambios al volver online. Sin claves de Supabase, en `npm run dev` hay perfiles locales de desarrollo con una base IndexedDB por usuario; en producción sin claves nadie puede entrar.
 - Toda la interfaz está en **español** (`es-ES`). El código, identificadores y comentarios, en inglés.
 - Desplegada en GitHub Pages: `https://bperezglez.github.io/strata-fit/`.
 
@@ -25,9 +25,9 @@ Instrucciones para agentes de IA (Cursor, Claude Code, Codex, Copilot…) y pers
 | UI | shadcn/ui estilo **base-nova**, construido sobre **Base UI** (`@base-ui/react`), iconos `lucide-react`, toasts `sonner` |
 | Gráficos | Recharts (cargado con `React.lazy`) |
 | Auth + datos | Supabase (`@supabase/supabase-js`, Google OAuth PKCE, Postgres + RLS), cargado de forma diferida |
-| Persistencia local | `idb` (IndexedDB) para el modo de desarrollo, tras la interfaz `WorkoutRepository` |
+| Persistencia local | `idb` (IndexedDB): caché offline por usuario delante de Supabase, o almacenamiento principal en modo desarrollo |
 | PWA | `vite-plugin-pwa` (`autoUpdate`), iconos con `@vite-pwa/assets-generator` |
-| Lint | `oxlint` |
+| Lint / tests | `oxlint`, Vitest (`npm test`) |
 
 ## Comandos
 
@@ -36,12 +36,14 @@ npm install
 npm run icons     # genera los PNG/ICO de public/ a partir de public/logo.svg (no están versionados)
 npm run dev       # http://localhost:47321
 npm run lint
+npm test          # Vitest: caché offline y cola de sincronización
 npm run build     # tsc -b && vite build → dist/
 npm run preview   # sirve dist/ en http://localhost:47322
 BASE_PATH=/strata-fit/ npm run build   # build igual que en GitHub Pages
+VITE_SIMULATE_SYNC=true npm run dev    # perfiles locales + caché offline + servidor simulado (sin Supabase)
 ```
 
-No hay tests automatizados. **Antes de dar un cambio por terminado: `npm run lint` y `npm run build` deben pasar sin errores**, y hay que probar el flujo afectado en el navegador (idealmente también en viewport móvil, ~390 px).
+**Antes de dar un cambio por terminado: `npm run lint`, `npm test` y `npm run build` deben pasar sin errores**, y hay que probar el flujo afectado en el navegador (idealmente también en viewport móvil, ~390 px).
 
 ## Estructura
 
@@ -59,10 +61,12 @@ src/
     history.ts             serie histórica por ejercicio para los gráficos
     utils.ts               cn() (clsx + tailwind-merge)
     storage/
-      repository.ts        interfaz WorkoutRepository (frontera de persistencia)
+      repository.ts        interfaz WorkoutRepository + SyncedRepository
+      cached.ts            caché offline por usuario con outbox y sync en background
       indexeddb.ts         implementación IndexedDB
       local-storage.ts     fallback localStorage
       supabase.ts          implementación Supabase (una instancia por usuario)
+      simulated-remote.ts  servidor simulado (solo dev, VITE_SIMULATE_SYNC)
       index.ts             createRepository(userId): elige backend
     supabase.ts            cliente Supabase (import dinámico) e isSupabaseConfigured
   store/auth-store.ts      sesión: modo supabase / local / unconfigured, login y logout
@@ -71,7 +75,8 @@ src/
     auth-gate.tsx          protege toda la app; splash, login o error de configuración
     login-screen.tsx       botón de Google (o perfiles locales en desarrollo)
     user-menu.tsx          avatar, datos de la cuenta y cerrar sesión
-    app-header.tsx         selector de semana + menú de datos + menú de usuario
+    app-header.tsx         selector de semana + indicador de sync + menú de datos + menú de usuario
+    sync-indicator.tsx     estado de sincronización (nube en la cabecera)
     day-tabs.tsx           pestañas L-V con indicador de sesión registrada
     day-session.tsx        sesión del día: lista de ExerciseCard, copiar anterior, vaciar
     exercise-card.tsx      tabla de series editable de un ejercicio
@@ -86,13 +91,16 @@ src/
 
 ### Flujo de datos
 
-`Componentes → actions (store) → WorkoutRepository → IndexedDB/localStorage`
+`Componentes → actions (store) → WorkoutRepository → (CachedRepository → Supabase | IndexedDB)`
 
 - Los componentes **nunca** acceden al almacenamiento directamente. Leen con `useWorkoutStore(selector)` y escriben solo con `actions.*`.
 - El store es un módulo con `useSyncExternalStore`, sin librerías de estado. El estado es inmutable: cada cambio crea objetos nuevos.
 - Las escrituras se persisten con **debounce de 250 ms por log**. `flushPendingWrites()` se llama en `visibilitychange`/`pagehide`. Cualquier operación masiva (import, borrar) debe llamar `flushPendingWrites()` o cancelar pendientes antes.
-- `actions.init(userId)` es idempotente por usuario (`initPromise`), porque StrictMode monta dos veces. Cambiar de usuario o `actions.reset()` guarda lo pendiente del usuario anterior antes de vaciar el estado.
-- Cerrar sesión: `await flushPendingWrites()` **antes** de `authActions.signOut()`, porque sin sesión RLS rechaza las escrituras.
+- Con Supabase, `CachedRepository` escribe al instante en la caché local (`fittrack-cache:{userId}`) y encola la subida. `sync()` hace push del outbox y pull del servidor; reintenta al volver online. El store expone `sync` en el estado y `actions.syncNow()`.
+- `actions.init(userId)` es idempotente por usuario (`initPromise`), porque StrictMode monta dos veces. La primera vez en un dispositivo espera al servidor; después muestra la caché local y refresca en background.
+- Cambiar de usuario o `actions.reset()` guarda lo pendiente del usuario anterior antes de vaciar el estado. Si todo estaba subido, `dispose({ purgeIfSynced: true })` borra la caché local de ese usuario.
+- Cerrar sesión: `await actions.prepareSignOut()` **antes** de `authActions.signOut()`. Sube lo que pueda y avisa si quedan cambios solo en el dispositivo; sin sesión RLS rechaza las escrituras.
+- Sin conexión, si el token de acceso ha caducado, `auth-store` recuerda el último usuario (`fittrack:last-user`) para seguir mostrando su caché offline hasta que la sesión se renueve online.
 - Un log sin series se elimina (no se guardan sesiones vacías).
 
 ### Modelo de datos (contrato estable)
@@ -150,9 +158,8 @@ Edita solo `src/data/routine.ts`. Cada ejercicio: `id` (kebab-case, único en to
 
 Por si buscas por dónde empezar (confírmalo con el usuario antes de hacer algo grande):
 
-- Caché offline por usuario (IndexedDB) delante de `SupabaseRepository`, con cola de escrituras pendientes.
 - Migrar automáticamente a la cuenta los datos que un usuario tenía en el navegador antes del login (hoy: exportar e importar JSON).
-- Rutina editable desde la app, guardada junto a los datos y con migración de ids.
+- Rutina editable desde la app, guardada junto a los datos y con migración de ids (ver `docs/custom-routines.md`).
 - Temporizador de descanso entre series.
 - Estimación de 1RM y récords personales por ejercicio.
 - Tests unitarios (Vitest) para `lib/week.ts`, `lib/metrics.ts` y `parseImport`.
