@@ -12,8 +12,10 @@ export interface StoreState {
   logs: Record<string, WorkoutLog>
 }
 
-let state: StoreState = { status: 'loading', error: null, backend: null, logs: {} }
+const initialState: StoreState = { status: 'loading', error: null, backend: null, logs: {} }
+let state: StoreState = initialState
 let repo: WorkoutRepository | null = null
+let activeUserId: string | null = null
 const listeners = new Set<() => void>()
 const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>()
 const WRITE_DEBOUNCE_MS = 250
@@ -56,22 +58,24 @@ function schedulePersist(id: string) {
   )
 }
 
-function persistNow(id: string) {
+function persistNow(id: string): Promise<void> {
   pendingWrites.delete(id)
-  if (!repo) return
+  if (!repo) return Promise.resolve()
   const log = state.logs[id]
   const op = log ? repo.put(log) : repo.remove(id)
-  op.catch((err) => {
+  return op.catch((err) => {
     console.error(err)
     setState({ error: 'No se pudo guardar. Exporta tus datos por seguridad.' })
   })
 }
 
-export function flushPendingWrites() {
+export function flushPendingWrites(): Promise<void> {
+  const ops: Promise<void>[] = []
   for (const [id, t] of pendingWrites) {
     clearTimeout(t)
-    persistNow(id)
+    ops.push(persistNow(id))
   }
+  return Promise.all(ops).then(() => undefined)
 }
 
 function writeLog(id: string, log: WorkoutLog | null) {
@@ -99,25 +103,51 @@ function mutateExercise(
 
 let initPromise: Promise<void> | null = null
 
-async function loadFromRepository() {
+async function loadFromRepository(userId: string) {
   try {
-    repo = await createRepository()
-    const all = await repo.getAll()
+    const next = await createRepository(userId)
+    const all = await next.getAll()
+    if (activeUserId !== userId) return
+    repo = next
     setState({
       status: 'ready',
-      backend: repo.name,
+      backend: next.name,
       logs: Object.fromEntries(all.map((l) => [l.id, l])),
     })
   } catch (err) {
     console.error(err)
-    setState({ status: 'error', error: 'No se pudo abrir el almacenamiento local del navegador.' })
+    if (activeUserId !== userId) return
+    setState({ status: 'error', error: 'No se pudo cargar tu historial.' })
   }
 }
 
 export const actions = {
-  init() {
-    initPromise ??= loadFromRepository()
+  /** Idempotent per user, because StrictMode mounts twice. */
+  init(userId: string) {
+    if (activeUserId === userId && initPromise) return initPromise
+    if (activeUserId) void actions.reset()
+    activeUserId = userId
+    initPromise = loadFromRepository(userId)
     return initPromise
+  },
+
+  retry() {
+    if (!activeUserId) return
+    const userId = activeUserId
+    activeUserId = null
+    initPromise = null
+    setState(initialState)
+    return actions.init(userId)
+  },
+
+  /** Persists anything pending for the current user, then forgets their data. */
+  async reset() {
+    const flushing = flushPendingWrites()
+    repo = null
+    activeUserId = null
+    initPromise = null
+    setState(initialState)
+    await flushing
   },
 
   dismissError() {
@@ -197,7 +227,7 @@ export const actions = {
   async importPayload(raw: unknown, mode: 'merge' | 'replace'): Promise<number> {
     const logs = parseImport(raw)
     if (!repo) throw new Error('Almacenamiento no inicializado')
-    flushPendingWrites()
+    await flushPendingWrites()
     if (mode === 'replace') await repo.clear()
     await repo.bulkPut(logs)
     const base = mode === 'replace' ? {} : state.logs

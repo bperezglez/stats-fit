@@ -6,7 +6,7 @@ Instrucciones para agentes de IA (Cursor, Claude Code, Codex, Copilot…) y pers
 
 **FitTrack**: PWA mínima y rápida para registrar entrenamiento semanal de fuerza, hipertrofia y cardio. Una rutina fija de lunes a viernes; cada ejercicio se registra por series (reps × kg = volumen, o duración/distancia en cardio). Hay gráficos de evolución por ejercicio, vista de progreso y botón para copiar la semana anterior.
 
-- Uso personal, **offline-first**, sin backend ni login. Los datos viven en el navegador (IndexedDB, con fallback a localStorage).
+- **Multiusuario con login de Google** (Supabase Auth). Toda la app está detrás de `AuthGate`; los datos viven en Supabase (`workout_logs`, RLS por `user_id = auth.uid()`). Sin claves de Supabase, en `npm run dev` hay perfiles locales de desarrollo con una base IndexedDB por usuario; en producción sin claves nadie puede entrar.
 - Toda la interfaz está en **español** (`es-ES`). El código, identificadores y comentarios, en inglés.
 - Desplegada en GitHub Pages: `https://bperezglez.github.io/strata-fit/`.
 
@@ -18,7 +18,8 @@ Instrucciones para agentes de IA (Cursor, Claude Code, Codex, Copilot…) y pers
 | Estilos | Tailwind CSS v4 (`@tailwindcss/vite`, sin `tailwind.config`; tokens en `src/index.css`) |
 | UI | shadcn/ui estilo **base-nova**, construido sobre **Base UI** (`@base-ui/react`), iconos `lucide-react`, toasts `sonner` |
 | Gráficos | Recharts (cargado con `React.lazy`) |
-| Persistencia | `idb` (IndexedDB) tras la interfaz `WorkoutRepository` |
+| Auth + datos | Supabase (`@supabase/supabase-js`, Google OAuth PKCE, Postgres + RLS), cargado de forma diferida |
+| Persistencia local | `idb` (IndexedDB) para el modo de desarrollo, tras la interfaz `WorkoutRepository` |
 | PWA | `vite-plugin-pwa` (`autoUpdate`), iconos con `@vite-pwa/assets-generator` |
 | Lint | `oxlint` |
 
@@ -40,6 +41,7 @@ No hay tests automatizados. **Antes de dar un cambio por terminado: `npm run lin
 
 ```
 src/
+  vite-env.d.ts            tipos de las variables VITE_*
   main.tsx                 entrada (el service worker lo inyecta vite-plugin-pwa como registerSW.js)
   App.tsx                  layout, vista Sesión/Progreso, semana y día activos, flush al ocultar la página
   index.css                tema Tailwind v4 (oscuro fijo, primario lima), fuentes
@@ -54,10 +56,16 @@ src/
       repository.ts        interfaz WorkoutRepository (frontera de persistencia)
       indexeddb.ts         implementación IndexedDB
       local-storage.ts     fallback localStorage
-      index.ts             createRepository(): elige backend
-  store/workout-store.ts   estado global + acciones (única fuente de verdad)
+      supabase.ts          implementación Supabase (una instancia por usuario)
+      index.ts             createRepository(userId): elige backend
+    supabase.ts            cliente Supabase (import dinámico) e isSupabaseConfigured
+  store/auth-store.ts      sesión: modo supabase / local / unconfigured, login y logout
+  store/workout-store.ts   estado global + acciones (única fuente de verdad), inicializado por usuario
   components/
-    app-header.tsx         selector de semana + menú de datos
+    auth-gate.tsx          protege toda la app; splash, login o error de configuración
+    login-screen.tsx       botón de Google (o perfiles locales en desarrollo)
+    user-menu.tsx          avatar, datos de la cuenta y cerrar sesión
+    app-header.tsx         selector de semana + menú de datos + menú de usuario
     day-tabs.tsx           pestañas L-V con indicador de sesión registrada
     day-session.tsx        sesión del día: lista de ExerciseCard, copiar anterior, vaciar
     exercise-card.tsx      tabla de series editable de un ejercicio
@@ -77,7 +85,8 @@ src/
 - Los componentes **nunca** acceden al almacenamiento directamente. Leen con `useWorkoutStore(selector)` y escriben solo con `actions.*`.
 - El store es un módulo con `useSyncExternalStore`, sin librerías de estado. El estado es inmutable: cada cambio crea objetos nuevos.
 - Las escrituras se persisten con **debounce de 250 ms por log**. `flushPendingWrites()` se llama en `visibilitychange`/`pagehide`. Cualquier operación masiva (import, borrar) debe llamar `flushPendingWrites()` o cancelar pendientes antes.
-- `actions.init()` es idempotente (`initPromise`), porque StrictMode monta dos veces.
+- `actions.init(userId)` es idempotente por usuario (`initPromise`), porque StrictMode monta dos veces. Cambiar de usuario o `actions.reset()` guarda lo pendiente del usuario anterior antes de vaciar el estado.
+- Cerrar sesión: `await flushPendingWrites()` **antes** de `authActions.signOut()`, porque sin sesión RLS rechaza las escrituras.
 - Un log sin series se elimina (no se guardan sesiones vacías).
 
 ### Modelo de datos (contrato estable)
@@ -96,9 +105,12 @@ src/
 
 Edita solo `src/data/routine.ts`. Cada ejercicio: `id` (kebab-case, único en toda la rutina), `name`, `kind`, `target` (texto libre, p. ej. `"4 × 10-12"`), `cue` opcional. Los días son fijos (`DayId`), así que añadir sábado/domingo implica tocar `DayId`, `ROUTINE`, `week.ts` y `parseImport`.
 
-### Conectar un backend remoto (Supabase/Firebase)
+### Autenticación y aislamiento por usuario
 
-Implementa `WorkoutRepository` en `src/lib/storage/<backend>.ts` y selecciónalo en `createRepository()`. El resto de la app no debe cambiar. Mantén el modo local como fallback sin credenciales y lee las claves de variables `VITE_*` (nunca las subas al repo). Hay un esquema orientativo de tabla en la sección «Conectar un backend» del README.
+- Nunca renderices contenido de la app ni llames a `actions.*` fuera de `AuthGate`.
+- Todo dato de usuario se asocia a `user.id` (UUID de Supabase Auth). En Supabase, cualquier tabla nueva con datos de usuario lleva `user_id uuid references auth.users` y políticas RLS para `select/insert/update/delete` con `(select auth.uid()) = user_id`. Añádela como nueva migración en `supabase/migrations/`.
+- Solo la clave publicable (`VITE_SUPABASE_PUBLISHABLE_KEY`) va al cliente. La `service_role` nunca.
+- El modo local (`mode === 'local'`) es solo para desarrollo: no es una barrera de seguridad.
 
 ## UI y estilo
 
@@ -132,7 +144,8 @@ Implementa `WorkoutRepository` en `src/lib/storage/<backend>.ts` y selecciónalo
 
 Por si buscas por dónde empezar (confírmalo con el usuario antes de hacer algo grande):
 
-- Sincronización en la nube (Supabase) implementando `WorkoutRepository`.
+- Caché offline por usuario (IndexedDB) delante de `SupabaseRepository`, con cola de escrituras pendientes.
+- Migrar automáticamente a la cuenta los datos que un usuario tenía en el navegador antes del login (hoy: exportar e importar JSON).
 - Rutina editable desde la app, guardada junto a los datos y con migración de ids.
 - Temporizador de descanso entre series.
 - Estimación de 1RM y récords personales por ejercicio.
