@@ -1,5 +1,6 @@
-import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb'
+import type { IDBPDatabase } from 'idb'
 import type { WorkoutLog } from '@/types'
+import { openUserCache, purgeUserCacheIfIdle, type CacheDB, type OutboxEntry } from './cache-db'
 import type { SyncState, SyncStatus, SyncedRepository, WorkoutRepository } from './repository'
 
 /** Outbox key for "wipe everything"; cannot collide with a log id (`YYYY-Www:day`). */
@@ -9,17 +10,6 @@ const CLEAR_KEY = '*clear*'
  * One entry per log id: a newer write to the same log replaces the queued one,
  * so the outbox never holds more than one operation per session.
  */
-type OutboxEntry =
-  | { key: string; seq: number; op: 'put'; log: WorkoutLog }
-  | { key: string; seq: number; op: 'remove' }
-  | { key: string; seq: number; op: 'clear' }
-
-interface CacheDB extends DBSchema {
-  logs: { key: string; value: WorkoutLog }
-  outbox: { key: string; value: OutboxEntry }
-  meta: { key: string; value: number }
-}
-
 const SYNC_DELAY_MS = 800
 const RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 
@@ -71,13 +61,7 @@ export class CachedRepository implements SyncedRepository {
     this.remote = remote
     this.autoSync = autoSync
     this.isOnline = isOnline
-    this.db = openDB<CacheDB>(dbName, 1, {
-      upgrade(db) {
-        db.createObjectStore('logs', { keyPath: 'id' })
-        db.createObjectStore('outbox', { keyPath: 'key' })
-        db.createObjectStore('meta')
-      },
-    })
+    this.db = openUserCache(dbName)
   }
 
   /** Restores the queue counters from disk and starts listening for reconnects. */
@@ -180,15 +164,7 @@ export class CachedRepository implements SyncedRepository {
     const db = await this.db
     const pending = await db.count('outbox')
     db.close()
-    if (purgeIfSynced && pending === 0) {
-      // Another open tab blocks the deletion; don't hang sign-out waiting for it.
-      await new Promise<void>((resolve) => {
-        deleteDB(this.dbName, { blocked: () => resolve() }).then(
-          () => resolve(),
-          () => resolve(),
-        )
-      })
-    }
+    if (purgeIfSynced && pending === 0) await purgeUserCacheIfIdle(this.dbName)
   }
 
   private async run(): Promise<SyncState> {
