@@ -1,0 +1,110 @@
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { AlertTriangle, ChartColumn, ClipboardList, X } from 'lucide-react'
+import { Toaster } from '@/components/ui/sonner'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AppHeader } from '@/components/app-header'
+import { DaySession } from '@/components/day-session'
+import { DayTabs } from '@/components/day-tabs'
+import { DAY_BY_ID } from '@/data/routine'
+import { currentWeekKey, todayDayId } from '@/lib/week'
+import { actions, flushPendingWrites, useWorkoutStore } from '@/store/workout-store'
+import type { DayId } from '@/types'
+
+const ProgressView = lazy(() => import('@/components/progress-view'))
+
+type View = 'session' | 'progress'
+
+export default function App() {
+  const status = useWorkoutStore((s) => s.status)
+  const error = useWorkoutStore((s) => s.error)
+  const [weekKey, setWeekKey] = useState(currentWeekKey)
+  const [day, setDay] = useState<DayId>(() => todayDayId() ?? 'lunes')
+  const [view, setView] = useState<View>('session')
+
+  useEffect(() => {
+    actions.init()
+    const flush = () => document.visibilityState === 'hidden' && flushPendingWrites()
+    document.addEventListener('visibilitychange', flush)
+    window.addEventListener('pagehide', flushPendingWrites)
+    return () => {
+      document.removeEventListener('visibilitychange', flush)
+      window.removeEventListener('pagehide', flushPendingWrites)
+    }
+  }, [])
+
+  return (
+    <div className="min-h-dvh">
+      <header className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur-xl">
+        <div className="mx-auto max-w-5xl space-y-3 px-3 pb-3 pt-[max(env(safe-area-inset-top),0.75rem)] sm:px-6">
+          <AppHeader weekKey={weekKey} onWeekChange={setWeekKey} />
+          <div className="flex items-center gap-2">
+            <Tabs value={view} onValueChange={(v) => setView(v as View)} className="w-full">
+              <TabsList className="h-9! w-full">
+                <TabsTrigger value="session">
+                  <ClipboardList />
+                  Sesión
+                </TabsTrigger>
+                <TabsTrigger value="progress">
+                  <ChartColumn />
+                  Progreso
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          {view === 'session' && <DayTabs weekKey={weekKey} value={day} onChange={setDay} />}
+        </div>
+      </header>
+
+      <main className="pb-safe mx-auto max-w-5xl px-3 pt-4 sm:px-6">
+        {error && status === 'ready' && (
+          <div className="mb-4 flex items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <AlertTriangle className="size-4 shrink-0" />
+            <span className="flex-1">{error}</span>
+            <button type="button" aria-label="Cerrar aviso" onClick={actions.dismissError}>
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
+
+        {status === 'loading' && <LoadingSkeleton />}
+
+        {status === 'error' && (
+          <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-6 text-center">
+            <AlertTriangle className="mx-auto size-8 text-destructive" />
+            <h2 className="mt-2 font-semibold">No se pudo cargar tu historial</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {error} Comprueba que el navegador no esté en modo privado estricto y recarga la página.
+            </p>
+          </div>
+        )}
+
+        {status === 'ready' &&
+          (view === 'session' ? (
+            <DaySession key={`${weekKey}-${day}`} day={DAY_BY_ID[day]} weekKey={weekKey} />
+          ) : (
+            <Suspense fallback={<LoadingSkeleton />}>
+              <ProgressView weekKey={weekKey} />
+            </Suspense>
+          ))}
+
+        <footer className="py-8 text-center text-xs text-muted-foreground">
+          Tus datos se guardan solo en este dispositivo. Exporta un JSON desde el menú ⋮ para tener copia.
+        </footer>
+      </main>
+      <Toaster position="bottom-center" />
+    </div>
+  )
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-3" aria-busy="true" aria-label="Cargando">
+      <div className="h-40 animate-pulse rounded-2xl bg-card" />
+      <div className="grid gap-3 lg:grid-cols-2">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className="h-48 animate-pulse rounded-2xl bg-card" />
+        ))}
+      </div>
+    </div>
+  )
+}
