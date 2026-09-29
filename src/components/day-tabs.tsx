@@ -1,4 +1,5 @@
 import { logSetCount } from '@/lib/metrics'
+import { enabledDays } from '@/lib/routine'
 import { currentWeekKey, todayDayId } from '@/lib/week'
 import { cn } from '@/lib/utils'
 import { useRoutineStore } from '@/store/routine-store'
@@ -13,11 +14,16 @@ interface Props {
 
 export function DayTabs({ weekKey, value, onChange }: Props) {
   const logs = useWorkoutStore((s) => s.logs)
-  const days = useRoutineStore((s) => s.days)
+  const days = enabledDays(useRoutineStore((s) => s.days))
   const today = weekKey === currentWeekKey() ? todayDayId() : null
 
   return (
-    <div role="tablist" aria-label="Día de la semana" className="grid grid-cols-5 gap-1.5">
+    <div
+      role="tablist"
+      aria-label="Día de la semana"
+      className="grid gap-1.5"
+      style={{ gridTemplateColumns: `repeat(${Math.max(days.length, 1)}, minmax(0, 1fr))` }}
+    >
       {days.map((d) => {
         const active = d.id === value
         const done = logSetCount(logs[logId(weekKey, d.id)]) > 0
@@ -30,6 +36,7 @@ export function DayTabs({ weekKey, value, onChange }: Props) {
             onClick={() => onChange(d.id)}
             className={cn(
               'relative flex flex-col items-center rounded-xl border px-1 py-2 transition-all',
+              today === d.id && 'pb-3',
               active ? 'border-transparent text-black' : 'border-border bg-card/60 text-foreground hover:bg-card',
             )}
             style={active ? { backgroundColor: d.accent } : undefined}

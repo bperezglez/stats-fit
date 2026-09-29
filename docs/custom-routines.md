@@ -177,7 +177,7 @@ interface ExerciseTemplate {
 | 1 | Migración SQL + `RoutineRepository` + seed desde `routine.ts` | Bajo — **hecho** (`user_routines`, `routine-store`, lectura en UI) |
 | 2 | `routine-store` + lectura en UI (sin editor) | Bajo |
 | 3 | Editor básico (nombre, target, añadir/archivar) | Medio — **hecho** (pestaña Mi rutina) |
-| 4 | Reordenar, días opcionales, sync offline de rutina | Medio |
+| 4 | Reordenar, metadatos del día, eliminar con historial, días opcionales (`enabled`), sync offline de rutina | Medio — **hecho** |
 | 5 | Migración de ids / fusión de ejercicios | Alto |
 
 Estimación de superficie: ~15–20 ficheros tocados, 1 migración SQL, tests en `lib/routine.ts` y en el repositorio de rutina.
@@ -199,4 +199,6 @@ Extender `ExportPayload` a `version: 2` incluyendo `routine` opcional. `parseImp
 
 La implementación es viable reutilizando casi toda la infraestructura recién añadida (caché offline, outbox, RLS por usuario). El trabajo más delicado no es la UI del editor, sino **mantener la estabilidad de los `exerciseId` en el histórico** y migrar la app de una rutina estática a una fuente de verdad por usuario sin romper a quien ya entrena con la rutina actual.
 
-Próximo paso recomendado: **Fase 1** (tabla + seed + lectura en store) en una rama aparte, desplegar, y solo después abrir el editor en la UI.
+Fase 4 (hecha): `updateDayMeta`, `reorderExercises` y `removeOrArchiveExercise` en `lib/routine.ts`; días con `enabled: false` ocultos en la sesión; caché IndexedDB `routine` + `routineOutbox` en la misma base `fittrack-cache:{userId}` (last-write-wins por `updatedAt`, aviso si otro dispositivo gana). El `DayId` no se edita.
+
+Próximo paso recomendado: **Fase 5** (fusión de ids) solo si hace falta unir historiales.

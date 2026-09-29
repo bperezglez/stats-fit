@@ -17,8 +17,10 @@ export function AuthGate({ children }: { children: (user: AuthUser) => ReactNode
 
   useEffect(() => {
     if (status === 'signed-out') {
-      void actions.reset()
-      routineActions.reset()
+      void (async () => {
+        await routineActions.reset()
+        await actions.reset()
+      })()
     }
   }, [status])
 

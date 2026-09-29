@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/app-header'
 import { AuthGate } from '@/components/auth-gate'
 import { DaySession } from '@/components/day-session'
 import { DayTabs } from '@/components/day-tabs'
+import { enabledDays } from '@/lib/routine'
 import { currentWeekKey, todayDayId } from '@/lib/week'
 import { useAuthStore, type AuthUser } from '@/store/auth-store'
 import { flushRoutineWrites, routineActions, useRoutineStore } from '@/store/routine-store'
@@ -34,11 +35,14 @@ function Workspace({ user }: { user: AuthUser }) {
   const workoutError = useWorkoutStore((s) => s.error)
   const routineError = useRoutineStore((s) => s.error)
   const dayById = useRoutineStore((s) => s.dayById)
+  const routineNotice = useRoutineStore((s) => s.notice)
+  const enabled = enabledDays(useRoutineStore((s) => s.days))
   const status = workoutStatus === 'loading' || routineStatus === 'loading' ? 'loading' : workoutStatus
   const error = workoutError ?? routineError
   const [weekKey, setWeekKey] = useState(currentWeekKey)
   const [day, setDay] = useState<DayId>(() => todayDayId() ?? 'lunes')
   const [view, setView] = useState<View>('session')
+  const selectedDay = enabled.find((d) => d.id === day) ?? enabled[0]
 
   useEffect(() => {
     void routineActions.init(user.id)
@@ -86,11 +90,24 @@ function Workspace({ user }: { user: AuthUser }) {
               </TabsList>
             </Tabs>
           </div>
-          {view === 'session' && <DayTabs weekKey={weekKey} value={day} onChange={setDay} />}
+          {view === 'session' && selectedDay && <DayTabs weekKey={weekKey} value={selectedDay.id} onChange={setDay} />}
+          {view === 'session' && !selectedDay && status === 'ready' && (
+            <p className="text-sm text-muted-foreground">No hay días activos. Actívalos en Mi rutina.</p>
+          )}
         </div>
       </header>
 
       <main className="pb-safe mx-auto max-w-5xl px-3 pt-4 sm:px-6">
+        {routineNotice && status === 'ready' && (
+          <div className="mb-4 flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-3 py-2 text-sm">
+            <AlertTriangle className="size-4 shrink-0 text-primary" />
+            <span className="flex-1">{routineNotice}</span>
+            <button type="button" aria-label="Cerrar aviso" onClick={() => routineActions.dismissNotice()}>
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
+
         {error && status === 'ready' && (
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="size-4 shrink-0" />
@@ -134,8 +151,8 @@ function Workspace({ user }: { user: AuthUser }) {
           </div>
         )}
 
-        {status === 'ready' && view === 'session' && (
-          <DaySession key={`${weekKey}-${day}`} day={dayById[day]} weekKey={weekKey} />
+        {status === 'ready' && view === 'session' && selectedDay && (
+          <DaySession key={`${weekKey}-${selectedDay.id}`} day={dayById[selectedDay.id]} weekKey={weekKey} />
         )}
 
         {status === 'ready' && view === 'progress' && (

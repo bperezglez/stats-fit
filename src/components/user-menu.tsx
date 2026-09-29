@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { authActions, useAuthStore, type AuthUser } from '@/store/auth-store'
+import { routineActions } from '@/store/routine-store'
 import { actions } from '@/store/workout-store'
 
 const initials = (name: string) =>
@@ -27,11 +28,16 @@ export function UserMenu({ user }: { user: AuthUser }) {
   const busy = useAuthStore((s) => s.busy)
 
   const signOut = async () => {
-    const pending = await actions.prepareSignOut()
+    const pendingLogs = await actions.prepareSignOut()
+    const pendingRoutine = await routineActions.prepareSignOut()
     await authActions.signOut()
-    if (pending) {
+    if (pendingLogs || pendingRoutine) {
+      const parts = [
+        pendingLogs === 1 ? '1 sesión' : pendingLogs > 1 ? `${pendingLogs} sesiones` : null,
+        pendingRoutine ? 'la rutina' : null,
+      ].filter(Boolean)
       toast.warning('Sesión cerrada con cambios sin subir', {
-        description: `${pending === 1 ? 'Queda 1 sesión guardada' : `Quedan ${pending} sesiones guardadas`} solo en este dispositivo. Se subirán cuando vuelvas a entrar con conexión.`,
+        description: `Quedan sin subir ${parts.join(' y ')}. Se subirán cuando vuelvas a entrar con conexión.`,
       })
     } else {
       toast('Sesión cerrada')
