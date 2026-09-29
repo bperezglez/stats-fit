@@ -36,7 +36,8 @@ npm install
 npm run icons     # genera los PNG/ICO de public/ a partir de public/logo.svg (no están versionados)
 npm run dev       # http://localhost:47321
 npm run lint
-npm test          # Vitest: caché offline y cola de sincronización
+npm test          # Vitest: caché offline, cola de sync y catálogo
+npm run catalog:build   # genera public/catalog/exercises.slim.json (requiere exercises-dataset)
 npm run build     # tsc -b && vite build → dist/
 npm run preview   # sirve dist/ en http://localhost:47322
 BASE_PATH=/strata-fit/ npm run build   # build igual que en GitHub Pages
@@ -55,6 +56,8 @@ src/
   index.css                tema Tailwind v4 (oscuro fijo, primario lima), fuentes
   types.ts                 modelo de dominio (DayId, ExerciseKind, SetEntry, WorkoutLog, ExportPayload)
   data/routine.ts          DEFAULT_ROUTINE (semilla); la UI lee la rutina del store por usuario
+  data/catalog.ts          carga en runtime de `/catalog/manifest.json` + chunks
+  lib/catalog/             tipos, parseo, búsqueda, etiquetas ES, inferencia de `ExerciseKind`
   store/routine-store.ts   rutina personal por usuario (Supabase `user_routines` o localStorage en dev)
   lib/routine.ts           parseo/validación del JSON de rutina, índices dayById/exerciseById
   lib/
@@ -126,6 +129,14 @@ src/
 - La UI **no** importa `ROUTINE` directamente: usa `useRoutineStore` (`days`, `dayById`, `exerciseById`). Mientras carga, el store expone la rutina por defecto en memoria.
 - Para cambiar la rutina por defecto de cuentas nuevas, edita `DEFAULT_ROUTINE`. Cada ejercicio: `id` (kebab-case, único en toda la rutina), `name`, `kind`, `target`, `cue` opcional. **No renombres `id`** sin migración: son claves del histórico.
 - Editor en app: ver `docs/custom-routines.md` (fases 2+).
+
+### Catálogo global de ejercicios (solo lectura)
+
+- Dataset fuente: [hasaneyldrm/exercises-dataset](https://github.com/hasaneyldrm/exercises-dataset) (~1.324 ejercicios). Metadatos MIT; **medios © Gym visual** — ver `public/catalog/NOTICE.md`.
+- `npm run catalog:build` lee `EXERCISES_JSON` o `/tmp/exercises-dataset/data/exercises.json` y escribe `public/catalog/manifest.json` + `public/catalog/chunks/*.json`.
+- Los GIF/imágenes no se versionan (`public/catalog/images/`, `public/catalog/videos/` en `.gitignore`). Copia esas carpetas del dataset en local si necesitas miniaturas.
+- En rutinas futuras, un ejercicio del catálogo usa `catalogId` (p. ej. `"0043"`) y un id estable `ev-0043` para logs.
+- Fase A = JSON slim + `lib/catalog/*` + tests. El picker UI llega en fases B/C.
 
 ### Autenticación y aislamiento por usuario
 
