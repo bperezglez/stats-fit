@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { AlertTriangle, ChartColumn, ClipboardList, RotateCw, X } from 'lucide-react'
+import { AlertTriangle, ChartColumn, ClipboardList, ListChecks, RotateCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -9,13 +9,14 @@ import { DaySession } from '@/components/day-session'
 import { DayTabs } from '@/components/day-tabs'
 import { currentWeekKey, todayDayId } from '@/lib/week'
 import { useAuthStore, type AuthUser } from '@/store/auth-store'
-import { routineActions, useRoutineStore } from '@/store/routine-store'
+import { flushRoutineWrites, routineActions, useRoutineStore } from '@/store/routine-store'
 import { actions, flushPendingWrites, useWorkoutStore } from '@/store/workout-store'
 import type { DayId } from '@/types'
 
 const ProgressView = lazy(() => import('@/components/progress-view'))
+const RoutineEditor = lazy(() => import('@/components/routine-editor'))
 
-type View = 'session' | 'progress'
+type View = 'session' | 'progress' | 'routine'
 
 export default function App() {
   return (
@@ -45,9 +46,17 @@ function Workspace({ user }: { user: AuthUser }) {
   }, [user.id])
 
   useEffect(() => {
-    const flush = () => document.visibilityState === 'hidden' && flushPendingWrites()
+    const flush = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingWrites()
+        void flushRoutineWrites()
+      }
+    }
     document.addEventListener('visibilitychange', flush)
-    window.addEventListener('pagehide', flushPendingWrites)
+    window.addEventListener('pagehide', () => {
+      flushPendingWrites()
+      void flushRoutineWrites()
+    })
     return () => {
       document.removeEventListener('visibilitychange', flush)
       window.removeEventListener('pagehide', flushPendingWrites)
@@ -69,6 +78,10 @@ function Workspace({ user }: { user: AuthUser }) {
                 <TabsTrigger value="progress">
                   <ChartColumn />
                   Progreso
+                </TabsTrigger>
+                <TabsTrigger value="routine">
+                  <ListChecks />
+                  Mi rutina
                 </TabsTrigger>
               </TabsList>
             </Tabs>
@@ -121,14 +134,21 @@ function Workspace({ user }: { user: AuthUser }) {
           </div>
         )}
 
-        {status === 'ready' &&
-          (view === 'session' ? (
-            <DaySession key={`${weekKey}-${day}`} day={dayById[day]} weekKey={weekKey} />
-          ) : (
-            <Suspense fallback={<LoadingSkeleton />}>
-              <ProgressView weekKey={weekKey} />
-            </Suspense>
-          ))}
+        {status === 'ready' && view === 'session' && (
+          <DaySession key={`${weekKey}-${day}`} day={dayById[day]} weekKey={weekKey} />
+        )}
+
+        {status === 'ready' && view === 'progress' && (
+          <Suspense fallback={<LoadingSkeleton />}>
+            <ProgressView weekKey={weekKey} />
+          </Suspense>
+        )}
+
+        {status === 'ready' && view === 'routine' && (
+          <Suspense fallback={<LoadingSkeleton />}>
+            <RoutineEditor />
+          </Suspense>
+        )}
 
         <footer className="py-8 text-center text-xs text-muted-foreground">
           {authMode === 'supabase'

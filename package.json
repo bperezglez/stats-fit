@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test": "vitest run",
     "catalog:build": "tsx scripts/build-catalog.ts",
+    "catalog:media": "tsx scripts/copy-catalog-media.ts",
     "preview": "vite preview",
     "icons": "pwa-assets-generator --preset minimal-2023 public/logo.svg"
   },

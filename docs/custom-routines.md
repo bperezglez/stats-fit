@@ -153,8 +153,8 @@ Integración por fases sobre [hasaneyldrm/exercises-dataset](https://github.com/
 | Fase | Entregable | Estado |
 | --- | --- | --- |
 | A | `manifest.json` + chunks, `lib/catalog/*`, tests, `NOTICE.md` | **Hecho** |
-| B | Picker en el editor de rutina (búsqueda + filtros) | Pendiente |
-| C | Miniaturas/GIF en la UI con atribución Gym visual | Pendiente |
+| B | Picker en el editor de rutina (búsqueda + filtros) | **Hecho** |
+| C | Miniaturas/GIF en la UI con atribución Gym visual | **Hecho** |
 
 Modelo en rutina del usuario (futuro):
 
@@ -176,7 +176,7 @@ interface ExerciseTemplate {
 | --- | --- | --- |
 | 1 | Migración SQL + `RoutineRepository` + seed desde `routine.ts` | Bajo — **hecho** (`user_routines`, `routine-store`, lectura en UI) |
 | 2 | `routine-store` + lectura en UI (sin editor) | Bajo |
-| 3 | Editor básico (nombre, target, añadir/archivar) | Medio |
+| 3 | Editor básico (nombre, target, añadir/archivar) | Medio — **hecho** (pestaña Mi rutina) |
 | 4 | Reordenar, días opcionales, sync offline de rutina | Medio |
 | 5 | Migración de ids / fusión de ejercicios | Alto |
 
