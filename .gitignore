@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Large catalog media (slim JSON is versioned; copy from exercises-dataset locally)
+public/catalog/images/
+public/catalog/videos/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

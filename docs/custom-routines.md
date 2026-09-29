@@ -144,7 +144,31 @@ Para muchos logs, mover la migración a una Edge Function con `service_role` (fu
 4. Archivar ejercicio: desaparece de la sesión pero sigue en histórico/gráficos si tiene datos.
 5. Restaurar rutina por defecto (confirmación fuerte).
 
-No incluir en MVP: biblioteca global de ejercicios, compartir rutinas, periodización automática.
+Compartir rutinas y periodización automática quedan fuera del MVP inicial.
+
+## Catálogo global de ejercicios
+
+Integración por fases sobre [hasaneyldrm/exercises-dataset](https://github.com/hasaneyldrm/exercises-dataset):
+
+| Fase | Entregable | Estado |
+| --- | --- | --- |
+| A | `manifest.json` + chunks, `lib/catalog/*`, tests, `NOTICE.md` | **Hecho** |
+| B | Picker en el editor de rutina (búsqueda + filtros) | Pendiente |
+| C | Miniaturas/GIF en la UI con atribución Gym visual | Pendiente |
+
+Modelo en rutina del usuario (futuro):
+
+```typescript
+interface ExerciseTemplate {
+  id: string           // "ev-0043" estable para logs
+  catalogId?: string   // "0043" cuando viene del catálogo
+  name: string
+  kind: ExerciseKind
+  target: string
+  cue?: string
+  archived?: boolean
+}
+```
 
 ## Orden de implementación sugerido
 
