@@ -30,6 +30,11 @@ jobs:
       - name: Generate PWA icons
         run: npm run icons
 
+      - name: Copy catalog media
+        run: |
+          git clone --depth 1 https://github.com/hasaneyldrm/exercises-dataset.git /tmp/exercises-dataset
+          npm run catalog:media
+
       - name: Build
         run: |
           if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then
