@@ -37,6 +37,8 @@ export interface DayTemplate {
   title: string
   focus: string
   accent: string
+  /** When false, the day stays in the routine but is hidden from the session. Defaults to true. */
+  enabled?: boolean
   exercises: ExerciseTemplate[]
 }
 
