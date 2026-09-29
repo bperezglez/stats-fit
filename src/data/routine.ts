@@ -1,6 +1,7 @@
 import type { DayId, DayTemplate, ExerciseTemplate } from '@/types'
 
-export const ROUTINE: DayTemplate[] = [
+/** Shipped default; also used to seed new accounts in Supabase. */
+export const DEFAULT_ROUTINE: DayTemplate[] = [
   {
     id: 'lunes',
     short: 'L',
@@ -84,8 +85,11 @@ export const ROUTINE: DayTemplate[] = [
   },
 ]
 
-export const DAY_BY_ID = Object.fromEntries(ROUTINE.map((d) => [d.id, d])) as Record<DayId, DayTemplate>
+/** @deprecated Use useRoutineStore — kept for tests and seed data. */
+export const ROUTINE = DEFAULT_ROUTINE
+
+export const DAY_BY_ID = Object.fromEntries(DEFAULT_ROUTINE.map((d) => [d.id, d])) as Record<DayId, DayTemplate>
 
 export const EXERCISE_BY_ID: Record<string, ExerciseTemplate & { day: DayId }> = Object.fromEntries(
-  ROUTINE.flatMap((d) => d.exercises.map((e) => [e.id, { ...e, day: d.id }])),
+  DEFAULT_ROUTINE.flatMap((d) => d.exercises.map((e) => [e.id, { ...e, day: d.id }])),
 )
