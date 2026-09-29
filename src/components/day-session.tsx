@@ -8,7 +8,8 @@ import { exerciseHistory } from '@/lib/history'
 import { exerciseStats, fmt, fmtCompact, logSetCount, logVolume, percentDelta } from '@/lib/metrics'
 import { dateOfDay, weekNumber } from '@/lib/week'
 import { cn } from '@/lib/utils'
-import { ROUTINE } from '@/data/routine'
+import { activeExercises, dayIndexOf } from '@/lib/routine'
+import { useRoutineStore } from '@/store/routine-store'
 import { actions, findPreviousLog, logId, useWorkoutStore } from '@/store/workout-store'
 import type { DayTemplate } from '@/types'
 
@@ -24,10 +25,12 @@ export function DaySession({ day, weekKey }: { day: DayTemplate; weekKey: string
   const prevVolume = logVolume(previousLog)
   const delta = percentDelta(volume, prevVolume)
   const sets = logSetCount(log)
-  const cardioMinutes = day.exercises
+  const routineDays = useRoutineStore((s) => s.days)
+  const visibleExercises = activeExercises(day)
+  const cardioMinutes = visibleExercises
     .filter((e) => e.kind === 'cardio')
     .reduce((acc, e) => acc + exerciseStats(log?.exercises[e.id], e.kind).totalDuration, 0)
-  const dayIndex = ROUTINE.findIndex((d) => d.id === day.id)
+  const dayIndex = dayIndexOf(routineDays, day.id)
 
   const copyPrevious = () => {
     const from = actions.copyPreviousDay(weekKey, day.id)
@@ -96,7 +99,7 @@ export function DaySession({ day, weekKey }: { day: DayTemplate; weekKey: string
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        {day.exercises.map((ex, i) => (
+        {visibleExercises.map((ex, i) => (
           <ExerciseCard
             key={ex.id}
             index={i}
