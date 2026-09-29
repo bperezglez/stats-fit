@@ -6,7 +6,7 @@ import {
   type SyncedRepository,
   type WorkoutRepository,
 } from '@/lib/storage'
-import { routineDayIds } from '@/lib/routine'
+import { isDayEnabled, routineDayIds } from '@/lib/routine'
 import { getRoutineDays } from '@/store/routine-store'
 import type { DayId, ExportPayload, SetEntry, WorkoutLog } from '@/types'
 
@@ -45,6 +45,10 @@ export function useWorkoutStore<T>(selector: (s: StoreState) => T): T {
 }
 
 export const logId = (weekKey: string, day: DayId) => `${weekKey}:${day}`
+
+export function getWorkoutLogs(): Record<string, WorkoutLog> {
+  return state.logs
+}
 
 export const uid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -275,6 +279,7 @@ export const actions = {
     if (!fromWeek) return null
     let days = 0
     for (const d of getRoutineDays()) {
+      if (!isDayEnabled(d)) continue
       const src = state.logs[logId(fromWeek, d.id)]
       if (!src) continue
       writeLog(logId(weekKey, d.id), cloneLog(src, weekKey))

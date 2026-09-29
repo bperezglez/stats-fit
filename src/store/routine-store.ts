@@ -5,12 +5,21 @@ import {
   buildDayById,
   buildExerciseById,
   createDefaultRoutineDocument,
+  exerciseHasLoggedSets,
+  removeOrArchiveExercise,
+  reorderExercises,
   restoreDefaultRoutineDocument,
+  setDayEnabled,
   setExerciseArchived,
+  updateDayMeta,
   updateExerciseInDay,
+  type DayMetaPatch,
   type ExercisePatch,
+  type ExerciseRemovalResult,
 } from '@/lib/routine'
-import { createRoutineRepository } from '@/lib/storage/routine-index'
+import type { SyncState } from '@/lib/storage'
+import { createRoutineRepository, isSyncedRoutineRepository, type SyncedRoutineRepository } from '@/lib/storage/routine-index'
+import { getWorkoutLogs } from '@/store/workout-store'
 import type { DayId, DayTemplate, ExerciseTemplate, UserRoutineDocument } from '@/types'
 
 type Status = 'loading' | 'ready' | 'error'
@@ -20,26 +29,46 @@ type RoutineRepo = Awaited<ReturnType<typeof createRoutineRepository>>
 export interface RoutineState {
   status: Status
   error: string | null
+  /** Set when another device saved a newer routine and this one was replaced. */
+  notice: string | null
   days: DayTemplate[]
   dayById: Record<DayId, DayTemplate>
   exerciseById: Record<string, ExerciseTemplate & { day: DayId }>
+  updatedAt: number
+  sync: SyncState | null
 }
 
-const applyDoc = (doc: UserRoutineDocument): Omit<RoutineState, 'status' | 'error'> => ({
+const applyDoc = (doc: UserRoutineDocument) => ({
   days: doc.days,
   dayById: buildDayById(doc.days),
   exerciseById: buildExerciseById(doc.days),
+  updatedAt: doc.updatedAt,
 })
 
 const fallback = applyDoc({ version: 1, days: DEFAULT_ROUTINE, updatedAt: 0 })
 
-let state: RoutineState = { status: 'loading', error: null, ...fallback }
+const initialState = (): RoutineState => ({
+  status: 'loading',
+  error: null,
+  notice: null,
+  sync: null,
+  ...fallback,
+})
+
+let state: RoutineState = initialState()
 let activeUserId: string | null = null
 let initPromise: Promise<void> | null = null
 let repo: RoutineRepo | null = null
+let unsubscribeRepo: (() => void) | null = null
 let pendingWrite: ReturnType<typeof setTimeout> | null = null
+let purgeOnReset = false
+let acceptRemoteNotice = false
 const listeners = new Set<() => void>()
 const WRITE_DEBOUNCE_MS = 250
+
+const REMOTE_NOTICE = 'Tu rutina cambió en otro dispositivo.'
+const REMOTE_REPLACED_NOTICE =
+  'Tu rutina cambió en otro dispositivo. Se ha cargado esa versión y se han descartado cambios locales que aún no se habían subido.'
 
 function setState(patch: Partial<RoutineState>) {
   state = { ...state, ...patch }
@@ -81,7 +110,11 @@ function clearCache(userId: string) {
 }
 
 function currentDocument(): UserRoutineDocument {
-  return { version: 1, days: state.days, updatedAt: Date.now() }
+  return {
+    version: 1,
+    days: state.days,
+    updatedAt: state.updatedAt > 0 ? state.updatedAt : Date.now(),
+  }
 }
 
 async function persistNow(): Promise<void> {
@@ -121,21 +154,49 @@ function applyMutation(mutator: (doc: UserRoutineDocument) => UserRoutineDocumen
   schedulePersist()
 }
 
+function connectRepo(next: SyncedRoutineRepository, userId: string) {
+  const offState = next.onSyncStateChange((sync) => {
+    if (activeUserId === userId) setState({ sync })
+  })
+  const offRemote = next.onRemoteChange((doc, info) => {
+    if (activeUserId !== userId) return
+    writeCache(userId, doc)
+    setState({
+      ...applyDoc(doc),
+      error: null,
+      notice: acceptRemoteNotice ? (info.replacedPending ? REMOTE_REPLACED_NOTICE : REMOTE_NOTICE) : state.notice,
+    })
+  })
+  unsubscribeRepo = () => {
+    offState()
+    offRemote()
+  }
+}
+
 async function loadRoutine(userId: string) {
   const cached = readCache(userId)
   if (cached) {
-    setState({ ...applyDoc(cached), status: 'loading', error: null })
+    setState({ ...applyDoc(cached), status: 'loading', error: null, notice: null })
   }
 
   try {
     repo = await createRoutineRepository(userId)
+    if (isSyncedRoutineRepository(repo)) connectRepo(repo, userId)
     const doc = await repo.getOrSeed()
     if (activeUserId !== userId) return
     writeCache(userId, doc)
-    setState({ status: 'ready', error: null, ...applyDoc(doc) })
+    setState({
+      status: 'ready',
+      error: null,
+      notice: null,
+      ...applyDoc(doc),
+      sync: isSyncedRoutineRepository(repo) ? repo.getSyncState() : null,
+    })
+    acceptRemoteNotice = true
   } catch (err) {
     console.error(err)
     if (activeUserId !== userId) return
+    acceptRemoteNotice = true
     if (cached) {
       setState({
         status: 'ready',
@@ -147,6 +208,7 @@ async function loadRoutine(userId: string) {
       status: 'ready',
       error: 'No se pudo cargar tu rutina. Usando la rutina por defecto.',
       ...fallback,
+      notice: null,
     })
   }
 }
@@ -154,7 +216,7 @@ async function loadRoutine(userId: string) {
 export const routineActions = {
   init(userId: string) {
     if (activeUserId === userId && initPromise) return initPromise
-    if (activeUserId && activeUserId !== userId) routineActions.reset()
+    if (activeUserId && activeUserId !== userId) void routineActions.reset()
     activeUserId = userId
     initPromise = loadRoutine(userId)
     return initPromise
@@ -163,15 +225,27 @@ export const routineActions = {
   retry() {
     if (!activeUserId) return Promise.resolve()
     const userId = activeUserId
+    const previous = repo
+    unsubscribeRepo?.()
+    unsubscribeRepo = null
     activeUserId = null
     initPromise = null
     repo = null
-    setState({ status: 'loading', error: null, ...fallback })
+    acceptRemoteNotice = false
+    setState(initialState())
+    if (previous && isSyncedRoutineRepository(previous)) void previous.dispose()
     return routineActions.init(userId)
   },
 
   reset() {
-    if (activeUserId) clearCache(activeUserId)
+    const userId = activeUserId
+    if (userId) clearCache(userId)
+    const previous = repo
+    const purgeIfSynced = purgeOnReset
+    purgeOnReset = false
+    acceptRemoteNotice = false
+    unsubscribeRepo?.()
+    unsubscribeRepo = null
     activeUserId = null
     initPromise = null
     repo = null
@@ -179,11 +253,43 @@ export const routineActions = {
       clearTimeout(pendingWrite)
       pendingWrite = null
     }
-    setState({ status: 'loading', error: null, ...fallback })
+    setState(initialState())
+    if (previous && isSyncedRoutineRepository(previous)) return previous.dispose({ purgeIfSynced })
+    return Promise.resolve()
+  },
+
+  /** Uploads the queued routine before sign-out. Returns 1 when a change stays on this device. */
+  async prepareSignOut(): Promise<number> {
+    await flushRoutineWrites()
+    if (!repo || !isSyncedRoutineRepository(repo)) return 0
+    const { pending } = await repo.sync()
+    purgeOnReset = pending === 0
+    return pending
+  },
+
+  syncNow(): Promise<SyncState | null> {
+    return repo && isSyncedRoutineRepository(repo) ? repo.sync() : Promise.resolve(null)
   },
 
   dismissError() {
     setState({ error: null })
+  },
+
+  dismissNotice() {
+    setState({ notice: null })
+  },
+
+  updateDayMeta(dayId: DayId, patch: DayMetaPatch) {
+    applyMutation((doc) => updateDayMeta(doc, dayId, patch))
+  },
+
+  setDayEnabled(dayId: DayId, enabled: boolean) {
+    applyMutation((doc) => setDayEnabled(doc, dayId, enabled))
+  },
+
+  reorderExercises(dayId: DayId, fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return
+    applyMutation((doc) => reorderExercises(doc, dayId, fromIndex, toIndex))
   },
 
   addExercise(dayId: DayId, exercise: ExerciseTemplate) {
@@ -192,6 +298,16 @@ export const routineActions = {
 
   updateExercise(dayId: DayId, exerciseId: string, patch: ExercisePatch) {
     applyMutation((doc) => updateExerciseInDay(doc, dayId, exerciseId, patch))
+  },
+
+  /**
+   * Archives the exercise when any workout log has sets for it; otherwise deletes it.
+   * The id is never reused for a different exercise because archived rows stay in the routine.
+   */
+  removeExercise(dayId: DayId, exerciseId: string): ExerciseRemovalResult['action'] {
+    const hasLoggedSets = exerciseHasLoggedSets(Object.values(getWorkoutLogs()), exerciseId)
+    applyMutation((doc) => removeOrArchiveExercise(doc, dayId, exerciseId, hasLoggedSets).doc)
+    return hasLoggedSets ? 'archived' : 'removed'
   },
 
   archiveExercise(dayId: DayId, exerciseId: string) {
