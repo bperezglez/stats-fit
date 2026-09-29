@@ -1,15 +1,18 @@
 import { ChevronLeft, ChevronRight, Dumbbell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DataMenu } from '@/components/data-menu'
+import { UserMenu } from '@/components/user-menu'
 import { currentWeekKey, shiftWeek, weekNumber, weekRangeLabel } from '@/lib/week'
 import { cn } from '@/lib/utils'
+import type { AuthUser } from '@/store/auth-store'
 
 interface Props {
+  user: AuthUser
   weekKey: string
   onWeekChange: (weekKey: string) => void
 }
 
-export function AppHeader({ weekKey, onWeekChange }: Props) {
+export function AppHeader({ user, weekKey, onWeekChange }: Props) {
   const thisWeek = currentWeekKey()
   const isCurrent = weekKey === thisWeek
 
@@ -49,7 +52,10 @@ export function AppHeader({ weekKey, onWeekChange }: Props) {
         </Button>
       </div>
 
-      <DataMenu weekKey={weekKey} />
+      <div className="flex items-center">
+        <DataMenu weekKey={weekKey} />
+        <UserMenu user={user} />
+      </div>
     </div>
   )
 }

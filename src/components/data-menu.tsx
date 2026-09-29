@@ -113,7 +113,7 @@ export function DataMenu({ weekKey }: { weekKey: string }) {
         open={pendingImport != null}
         onOpenChange={(o) => !o && setPendingImport(null)}
         title="Importar copia de seguridad"
-        description="Elige cómo combinar el archivo con los datos de este dispositivo."
+        description="Elige cómo combinar el archivo con los datos de tu cuenta."
         confirmLabel="Importar"
         destructive={importMode === 'replace'}
         onConfirm={runImport}
@@ -154,7 +154,7 @@ export function DataMenu({ weekKey }: { weekKey: string }) {
         open={confirmClear}
         onOpenChange={setConfirmClear}
         title="¿Borrar todos los datos?"
-        description="Se eliminará todo tu historial de este dispositivo. Exporta un JSON antes si quieres conservarlo."
+        description="Se eliminará todo el historial de tu cuenta. Exporta un JSON antes si quieres conservarlo."
         confirmLabel="Borrar todo"
         destructive
         onConfirm={async () => {
