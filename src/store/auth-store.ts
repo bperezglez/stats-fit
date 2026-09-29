@@ -38,6 +38,7 @@ const mode: AuthMode = isSupabaseConfigured ? 'supabase' : allowLocal ? 'local' 
 
 const LOCAL_PROFILES_KEY = 'fittrack:local-profiles'
 const LOCAL_SESSION_KEY = 'fittrack:local-session'
+const LAST_USER_KEY = 'fittrack:last-user'
 
 let state: AuthState = {
   mode,
@@ -75,10 +76,36 @@ function userFromSession(session: Session | null): AuthUser | null {
 
 function applySession(session: Session | null) {
   const user = userFromSession(session)
+  rememberUser(user)
   // Token refreshes emit a new session for the same user; keep the object stable.
   if (user && state.user?.id === user.id && state.status === 'signed-in') return
   setState({ user, status: user ? 'signed-in' : 'signed-out', busy: false })
 }
+
+/**
+ * Lets the app open without a connection: when the stored access token has
+ * expired offline, Supabase cannot refresh it and reports no session, even
+ * though the refresh token is still valid. The data shown is only this user's
+ * offline copy; nothing reaches the server until the session is refreshed.
+ */
+function rememberUser(user: AuthUser | null) {
+  if (user) localStorage.setItem(LAST_USER_KEY, JSON.stringify(user))
+  else localStorage.removeItem(LAST_USER_KEY)
+}
+
+function rememberedUser(): AuthUser | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LAST_USER_KEY) ?? 'null') as AuthUser | null
+    return parsed && typeof parsed.id === 'string' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+const isNetworkAuthError = (err: unknown) =>
+  (err as { name?: unknown })?.name === 'AuthRetryableFetchError' ||
+  err instanceof TypeError ||
+  (typeof navigator !== 'undefined' && navigator.onLine === false)
 
 function oauthErrorFromUrl(): string | null {
   const params = new URLSearchParams(window.location.search)
@@ -106,13 +133,19 @@ async function initSupabase() {
   const urlError = oauthErrorFromUrl()
   try {
     const supabase = await getSupabase()
-    supabase.auth.onAuthStateChange((_event, session) => applySession(session))
+    // The initial state comes from getSession below, which tells a network failure apart from a real sign-out.
+    supabase.auth.onAuthStateChange((event, session) => event !== 'INITIAL_SESSION' && applySession(session))
     const { data, error } = await supabase.auth.getSession()
     if (error) throw error
     applySession(data.session)
     if (urlError) setState({ error: urlError })
   } catch (err) {
     console.error(err)
+    const offlineUser = isNetworkAuthError(err) ? rememberedUser() : null
+    if (offlineUser) {
+      setState({ status: 'signed-in', user: offlineUser, busy: false })
+      return
+    }
     setState({ status: 'signed-out', error: 'No se pudo conectar con el servicio de acceso. Revisa tu conexión.' })
   }
 }
@@ -187,6 +220,7 @@ export const authActions = {
         const supabase = await getSupabase()
         const { error } = await supabase.auth.signOut({ scope: 'local' })
         if (error) throw error
+        rememberUser(null)
       } else {
         localStorage.removeItem(LOCAL_SESSION_KEY)
       }

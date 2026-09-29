@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { authActions, useAuthStore, type AuthUser } from '@/store/auth-store'
-import { flushPendingWrites } from '@/store/workout-store'
+import { actions } from '@/store/workout-store'
 
 const initials = (name: string) =>
   name
@@ -27,9 +27,15 @@ export function UserMenu({ user }: { user: AuthUser }) {
   const busy = useAuthStore((s) => s.busy)
 
   const signOut = async () => {
-    await flushPendingWrites()
+    const pending = await actions.prepareSignOut()
     await authActions.signOut()
-    toast('Sesión cerrada')
+    if (pending) {
+      toast.warning('Sesión cerrada con cambios sin subir', {
+        description: `${pending === 1 ? 'Queda 1 sesión guardada' : `Quedan ${pending} sesiones guardadas`} solo en este dispositivo. Se subirán cuando vuelvas a entrar con conexión.`,
+      })
+    } else {
+      toast('Sesión cerrada')
+    }
   }
 
   return (
