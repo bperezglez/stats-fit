@@ -8,7 +8,7 @@ PWA minimalista para registrar entrenamientos de fuerza, hipertrofia y cardio se
 - **Histórico**: pulsa la cabecera de un ejercicio para ver su gráfico (volumen, peso máximo, reps; tiempo y distancia en cardio).
 - **Progreso**: volumen semanal apilado por día, minutos de cardio y récords de peso.
 - **Acceso con Google**: toda la app está detrás del inicio de sesión. Cada usuario tiene su propio historial, identificado por su id único de usuario, y nunca ve el de otros.
-- **Datos**: se guardan en Supabase (Postgres con Row Level Security) asociados a tu cuenta. Exporta/importa JSON desde el menú ⋮.
+- **Datos**: se guardan en Supabase (Postgres con Row Level Security) asociados a tu cuenta. Cada usuario tiene además una caché offline en el dispositivo: puedes registrar entrenamientos sin conexión y se suben solos al volver online. El icono de nube en la cabecera muestra el estado de sincronización. Exporta/importa JSON desde el menú ⋮.
 - **Offline e instalable**: service worker (Workbox) + manifest, así que se puede añadir a la pantalla de inicio.
 
 ## Stack
@@ -27,6 +27,14 @@ npm run dev                  # http://localhost:47321
 
 Sin claves de Supabase, `npm run dev` arranca en **modo local de desarrollo**: en lugar de Google aparece un formulario para crear perfiles de prueba, y cada perfil guarda sus datos en su propia base IndexedDB (`fittrack:{userId}`). Ese modo no es seguro y en un build de producción está desactivado: sin claves, nadie puede entrar.
 
+Para probar la caché offline y la cola de sincronización sin Supabase:
+
+```bash
+VITE_SIMULATE_SYNC=true npm run dev
+```
+
+Cada perfil local pasa por la misma capa de caché que en producción, con un servidor simulado en `localStorage`.
+
 Build de producción (el service worker solo se activa aquí):
 
 ```bash
@@ -34,7 +42,7 @@ npm run build
 npm run preview   # http://localhost:47322
 ```
 
-`npm run lint` ejecuta oxlint.
+`npm run lint` ejecuta oxlint. `npm test` ejecuta Vitest (caché offline y sincronización).
 
 Los iconos de la PWA (`public/*.png`, `public/favicon.ico`) se generan a partir de `public/logo.svg`. Si faltan o cambias el logo:
 
