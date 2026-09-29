@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, Dumbbell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DataMenu } from '@/components/data-menu'
+import { SyncIndicator } from '@/components/sync-indicator'
 import { UserMenu } from '@/components/user-menu'
 import { currentWeekKey, shiftWeek, weekNumber, weekRangeLabel } from '@/lib/week'
 import { cn } from '@/lib/utils'
@@ -53,6 +54,7 @@ export function AppHeader({ user, weekKey, onWeekChange }: Props) {
       </div>
 
       <div className="flex items-center">
+        <SyncIndicator />
         <DataMenu weekKey={weekKey} />
         <UserMenu user={user} />
       </div>
