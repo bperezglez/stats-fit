@@ -68,6 +68,20 @@ export function logSetCount(log: WorkoutLog | undefined): number {
   return count
 }
 
+function setHasValue(set: SetEntry) {
+  return set.reps != null || set.weight != null || set.duration != null || set.distance != null
+}
+
+/**
+ * Previous-session rows to show when this week has not logged the exercise yet.
+ * They are a guide only: callers must not treat them as this week's workout.
+ */
+export function sessionGuide(current: SetEntry[] | undefined, previous: SetEntry[] | undefined): SetEntry[] | null {
+  if (current && current.length > 0) return null
+  if (!previous?.some(setHasValue)) return null
+  return previous
+}
+
 export function percentDelta(current: number, previous: number): number | null {
   if (!previous || !current) return null
   return ((current - previous) / previous) * 100

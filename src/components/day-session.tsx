@@ -27,6 +27,8 @@ export function DaySession({ day, weekKey }: { day: DayTemplate; weekKey: string
   const sets = logSetCount(log)
   const routineDays = useRoutineStore((s) => s.days)
   const visibleExercises = activeExercises(day)
+  const awaitingGuide =
+    Boolean(previousLog) && visibleExercises.some((exercise) => !(log?.exercises[exercise.id]?.length))
   const cardioMinutes = visibleExercises
     .filter((e) => e.kind === 'cardio')
     .reduce((acc, e) => acc + exerciseStats(log?.exercises[e.id], e.kind).totalDuration, 0)
@@ -34,7 +36,13 @@ export function DaySession({ day, weekKey }: { day: DayTemplate; weekKey: string
 
   const copyPrevious = () => {
     const from = actions.copyPreviousDay(weekKey, day.id)
-    if (from) toast.success(`Copiado ${day.label.toLowerCase()} de la semana ${weekNumber(from)}`)
+    if (!from) return
+    const week = weekNumber(from)
+    toast.success(
+      log
+        ? `Copiado ${day.label.toLowerCase()} de la semana ${week}`
+        : `Guía de la semana ${week} guardada en ${day.label.toLowerCase()}`,
+    )
   }
 
   return (
@@ -55,14 +63,21 @@ export function DaySession({ day, weekKey }: { day: DayTemplate; weekKey: string
           </div>
           <div className="flex gap-2">
             <Button
+              variant={log ? 'outline' : 'default'}
               size="lg"
               className="h-10"
               disabled={!previousLog}
               onClick={() => (log ? setConfirm('copy') : copyPrevious())}
-              title={previousLog ? `Copiar desde la semana ${weekNumber(previousLog.weekKey)}` : 'No hay semanas anteriores'}
+              title={
+                previousLog
+                  ? log
+                    ? `Sustituir esta sesión por la de la semana ${weekNumber(previousLog.weekKey)}`
+                    : `Guardar la guía de la semana ${weekNumber(previousLog.weekKey)} como sesión de hoy`
+                  : 'No hay una semana anterior con datos'
+              }
             >
               <CopyPlus />
-              Copiar semana anterior
+              {log ? 'Copiar semana anterior' : 'Usar esta guía'}
             </Button>
             {log && (
               <Button
@@ -90,10 +105,17 @@ export function DaySession({ day, weekKey }: { day: DayTemplate; weekKey: string
           <Stat icon={<Layers className="size-3.5" />} label="Series" value={String(sets)} />
           <Stat icon={<Timer className="size-3.5" />} label="Cardio" value={`${fmt(cardioMinutes)} min`} />
         </dl>
-        {previousLog && (
+        {previousLog && awaitingGuide && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Guía de la semana {weekNumber(previousLog.weekKey)} ({fmtCompact(prevVolume)} kg · {logSetCount(previousLog)}{' '}
+            series). Está en los ejercicios sin registrar y no cuenta como sesión hasta que cambies un valor
+            {log ? '.' : ' o pulses «Usar esta guía».'}
+          </p>
+        )}
+        {previousLog && !awaitingGuide && (
           <p className="mt-3 text-xs text-muted-foreground">
             Referencia: semana {weekNumber(previousLog.weekKey)} · {fmtCompact(prevVolume)} kg · {logSetCount(previousLog)}{' '}
-            series. Los valores en gris dentro de cada campo son los de esa sesión.
+            series. Los valores en gris dentro de cada campo vacío son los de esa sesión.
           </p>
         )}
       </div>

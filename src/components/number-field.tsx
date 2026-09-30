@@ -17,13 +17,14 @@ interface NumberFieldProps {
   label: string
   integer?: boolean
   className?: string
+  onFocus?: () => void
 }
 
 /**
  * Accepts both "," and "." as decimal separators and keeps the raw text while
  * typing so intermediate states like "22," aren't clobbered.
  */
-export function NumberField({ value, onChange, placeholder, label, integer, className }: NumberFieldProps) {
+export function NumberField({ value, onChange, placeholder, label, integer, className, onFocus }: NumberFieldProps) {
   const [draft, setDraft] = useState(() => toDraft(value))
   const [synced, setSynced] = useState(value)
 
@@ -40,7 +41,10 @@ export function NumberField({ value, onChange, placeholder, label, integer, clas
       enterKeyHint="next"
       value={draft}
       placeholder={placeholder}
-      onFocus={(e) => e.currentTarget.select()}
+      onFocus={(e) => {
+        onFocus?.()
+        e.currentTarget.select()
+      }}
       onChange={(e) => {
         const next = integer ? e.target.value.replace(/[^\d]/g, '') : e.target.value.replace(/[^\d.,]/g, '')
         setDraft(next)

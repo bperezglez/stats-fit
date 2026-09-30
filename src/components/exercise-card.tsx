@@ -1,9 +1,9 @@
 import { lazy, memo, Suspense, useState } from 'react'
-import { ArrowDownRight, ArrowUpRight, ChartSpline, Copy, Plus, X } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, ChartSpline, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { NumberField } from '@/components/number-field'
 import type { HistoryPoint } from '@/lib/history'
-import { exerciseStats, fmt, headlineValue, isFilled, percentDelta, setVolume } from '@/lib/metrics'
+import { exerciseStats, fmt, headlineValue, isFilled, percentDelta, sessionGuide, setVolume } from '@/lib/metrics'
 import { weekNumber } from '@/lib/week'
 import { cn } from '@/lib/utils'
 import { actions } from '@/store/workout-store'
@@ -84,13 +84,20 @@ export const ExerciseCard = memo(function ExerciseCard({
   const [showChart, setShowChart] = useState(false)
   const columns = columnsFor(exercise)
   const derived = derivedLabel(exercise)
+  const guide = sessionGuide(sets, previous?.sets)
+  const rows = guide ?? sets
   const stats = exerciseStats(sets, exercise.kind)
   const prevStats = previous ? exerciseStats(previous.sets, exercise.kind) : null
   const current = headlineValue(stats, exercise.kind)
   const prevValue = prevStats ? headlineValue(prevStats, exercise.kind) : 0
-  const delta = percentDelta(current, prevValue)
+  const delta = guide ? null : percentDelta(current, prevValue)
   const unit = headlineUnit(exercise)
   const grid = 'grid grid-cols-[1.75rem_1fr_1fr_4.25rem_2rem] items-center gap-2'
+
+  const commitGuide = (next: SetEntry[]) => {
+    if (!next.length) return
+    actions.replaceSets(weekKey, day, exercise.id, next)
+  }
 
   return (
     <article className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm shadow-black/20">
@@ -115,8 +122,13 @@ export const ExerciseCard = memo(function ExerciseCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <div className="flex items-center gap-1.5 text-muted-foreground">
-            <span className="text-sm font-bold tabular-nums text-foreground">
-              {current ? `${fmt(current)} ${unit}` : '—'}
+            <span
+              className={cn(
+                'text-sm font-bold tabular-nums',
+                guide ? 'font-semibold text-muted-foreground' : 'text-foreground',
+              )}
+            >
+              {guide && prevValue ? `Guía ${fmt(prevValue)} ${unit}` : current ? `${fmt(current)} ${unit}` : '—'}
             </span>
             <ChartSpline className={cn('size-4 transition-colors', showChart && 'text-primary')} />
           </div>
@@ -144,7 +156,12 @@ export const ExerciseCard = memo(function ExerciseCard({
       )}
 
       <div className="space-y-2 px-4 pb-4">
-        {sets.length > 0 && (
+        {guide && previous && (
+          <p className="text-xs text-muted-foreground">
+            Guía de la semana {weekNumber(previous.weekKey)}. Cambia un valor para registrarla hoy.
+          </p>
+        )}
+        {rows.length > 0 && (
           <div className={cn(grid, 'px-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground')}>
             <span className="text-center">#</span>
             {columns.map((c) => (
@@ -157,15 +174,19 @@ export const ExerciseCard = memo(function ExerciseCard({
           </div>
         )}
 
-        {sets.map((s, i) => {
-          const prevSet = previous?.sets[i]
-          const up = exercise.kind === 'strength' && prevSet && setVolume(s) > setVolume(prevSet)
+        {rows.map((s, i) => {
+          const prevSet = guide ? undefined : previous?.sets[i]
+          const up = !guide && exercise.kind === 'strength' && prevSet && setVolume(s) > setVolume(prevSet)
           return (
-            <div key={s.id} className={grid}>
+            <div key={i} className={grid}>
               <span
                 className={cn(
                   'flex size-7 items-center justify-center rounded-md text-xs font-bold tabular-nums',
-                  isFilled(s, exercise.kind) ? 'bg-muted text-foreground' : 'bg-muted/40 text-muted-foreground',
+                  guide
+                    ? 'border border-dashed border-border text-muted-foreground'
+                    : isFilled(s, exercise.kind)
+                      ? 'bg-muted text-foreground'
+                      : 'bg-muted/40 text-muted-foreground',
                 )}
               >
                 {i + 1}
@@ -173,11 +194,25 @@ export const ExerciseCard = memo(function ExerciseCard({
               {columns.map((c) => (
                 <NumberField
                   key={c.field}
-                  label={`${c.label} serie ${i + 1}`}
+                  label={
+                    guide
+                      ? `${c.label} serie ${i + 1}, guía de la semana anterior`
+                      : `${c.label} serie ${i + 1}`
+                  }
                   integer={c.integer}
                   value={s[c.field]}
                   placeholder={prevSet?.[c.field] != null ? String(prevSet[c.field]).replace('.', ',') : '0'}
-                  onChange={(v) => actions.updateSet(weekKey, day, exercise.id, s.id, { [c.field]: v })}
+                  onFocus={() => {
+                    if (guide) commitGuide(guide)
+                  }}
+                  onChange={(v) => {
+                    if (guide) {
+                      commitGuide(guide.map((row, index) => (index === i ? { ...row, [c.field]: v } : row)))
+                      return
+                    }
+                    actions.updateSet(weekKey, day, exercise.id, s.id, { [c.field]: v })
+                  }}
+                  className={guide ? 'border-dashed font-medium text-muted-foreground' : undefined}
                 />
               ))}
               <span
@@ -188,26 +223,26 @@ export const ExerciseCard = memo(function ExerciseCard({
               >
                 {derivedValue(exercise, s)}
               </span>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Eliminar serie ${i + 1}`}
-                onClick={() => actions.removeSet(weekKey, day, exercise.id, s.id)}
-                className="text-muted-foreground hover:text-destructive"
-              >
-                <X />
-              </Button>
+              {guide ? (
+                <span />
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Eliminar serie ${i + 1}`}
+                  onClick={() => actions.removeSet(weekKey, day, exercise.id, s.id)}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <X />
+                </Button>
+              )}
             </div>
           )
         })}
 
-        {sets.length === 0 && (
+        {rows.length === 0 && (
           <p className="rounded-xl border border-dashed border-border px-3 py-3 text-center text-xs text-muted-foreground">
-            {previous
-              ? `S${weekNumber(previous.weekKey)}: ${prevStats?.sets ?? 0} series${
-                  prevStats?.maxWeight ? ` · ${fmt(prevStats.maxWeight)} kg máx.` : ''
-                }${prevValue ? ` · ${fmt(prevValue)} ${unit}` : ''}`
-              : 'Sin series esta semana. Añade la primera para empezar a registrar.'}
+            Sin series esta semana. Añade la primera para empezar a registrar.
           </p>
         )}
 
@@ -215,21 +250,18 @@ export const ExerciseCard = memo(function ExerciseCard({
           <Button
             variant="secondary"
             className="h-10 flex-1"
-            onClick={() => actions.addSet(weekKey, day, exercise.id, previous?.sets[sets.length])}
+            onClick={() => {
+              if (guide) {
+                commitGuide(guide)
+                actions.addSet(weekKey, day, exercise.id)
+                return
+              }
+              actions.addSet(weekKey, day, exercise.id, previous?.sets[sets.length])
+            }}
           >
             <Plus />
             Añadir serie
           </Button>
-          {sets.length === 0 && previous && (
-            <Button
-              variant="outline"
-              className="h-10"
-              onClick={() => actions.replaceSets(weekKey, day, exercise.id, previous.sets)}
-            >
-              <Copy />
-              Repetir S{weekNumber(previous.weekKey)}
-            </Button>
-          )}
         </div>
 
         {stats.sets > 0 && exercise.kind === 'strength' && (
